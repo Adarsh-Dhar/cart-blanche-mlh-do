@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Futuristic Space Shopping Theme */
+    /* Primary Colors */
+    --primary: 66 100% 50%;              /* Neon Lime Green #CDDC39 */
+    --primary-foreground: 0 0% 5%;       /* Near Black */
+    
+    /* Backgrounds */
+    --background: 0 0% 5%;               /* Deep Black */
+    --foreground: 0 0% 95%;              /* Off-White */
+    
+    /* Card & Surface */
+    --card: 0 0% 10%;                    /* Dark Grey-Black */
+    --card-foreground: 0 0% 95%;         /* Off-White */
+    
+    /* Popover */
+    --popover: 0 0% 8%;                  /* Slightly Lighter Black */
+    --popover-foreground: 0 0% 95%;      /* Off-White */
+    
+    /* Secondary & Accent */
+    --secondary: 260 90% 40%;            /* Vibrant Purple/Blue */
+    --secondary-foreground: 0 0% 98%;    /* Nearly White */
+    
+    --muted: 0 0% 20%;                   /* Dark Grey */
+    --muted-foreground: 0 0% 70%;        /* Light Grey */
+    
+    --accent: 66 100% 50%;               /* Lime Green Accent */
+    --accent-foreground: 0 0% 5%;        /* Black Text on Accent */
+    
+    /* Destructive */
+    --destructive: 0 84.2% 60.2%;        /* Red */
+    --destructive-foreground: 0 0% 98%;  /* White */
+    
+    /* Border & Input */
+    --border: 0 0% 20%;                  /* Dark Grey Border */
+    --input: 0 0% 12%;                   /* Dark Input Background */
+    --ring: 66 100% 50%;                 /* Lime Green Focus Ring */
+    
+    /* Chart Colors */
+    --chart-1: 66 100% 50%;              /* Lime Green */
+    --chart-2: 260 90% 40%;              /* Purple */
+    --chart-3: 0 100% 50%;               /* Red */
+    --chart-4: 180 90% 45%;              /* Cyan */
+    --chart-5: 300 100% 55%;             /* Magenta */
+    
+    /* Border Radius */
+    --radius: 0.75rem;
+    
+    /* Sidebar Theme */
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 66 100% 50%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 66 100% 50%;
+    --sidebar-accent-foreground: 0 0% 5%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 66 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+  }
+  
+  h1 {
+    @apply text-4xl md:text-5xl lg:text-6xl;
+  }
+  
+  h2 {
+    @apply text-3xl md:text-4xl;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  /* Neon Glow Effect */
+  .glow-lime {
+    box-shadow: 0 0 20px rgba(205, 220, 57, 0.5);
+  }
+  
+  .glow-lime-sm {
+    box-shadow: 0 0 10px rgba(205, 220, 57, 0.3);
+  }
+  
+  /* Gradient Backgrounds */
+  .bg-gradient-futuristic {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 1) 0%, rgba(20, 20, 30, 1) 100%);
+  }
+  
+  /* Neon Text */
+  .text-neon {
+    color: hsl(66, 100%, 50%);
+    text-shadow: 0 0 10px rgba(205, 220, 57, 0.5);
+  }
+}
