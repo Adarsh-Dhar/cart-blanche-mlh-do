@@ -1,0 +1,12 @@
+{
+  "name": "CoffeeBot_Merchant",
+  "description": "Specialized in organic coffee beans.",
+  "url": "http://your-merchant-endpoint.com/a2a",
+  "skills": [
+    {
+      "id": "sell_coffee",
+      "name": "Coffee Sales",
+      "description": "Can generate Cart Mandates for coffee products."
+    }
+  ]
+}
