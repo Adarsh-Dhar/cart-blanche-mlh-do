@@ -8,14 +8,9 @@ interface LocaleDateProps {
 }
 
 export function LocaleDate({ date, format = 'date' }: LocaleDateProps) {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  if (!mounted) {
-    return <span>{'-'}</span>
+  const isClient = typeof window !== 'undefined';
+  if (!isClient) {
+    return <span suppressHydrationWarning>{'-'}</span>;
   }
 
   if (format === 'date') {

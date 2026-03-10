@@ -7,14 +7,9 @@ interface MessageTimestampProps {
 }
 
 export function MessageTimestamp({ date }: MessageTimestampProps) {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  if (!mounted) {
-    return <p className="text-xs mt-2 opacity-70" suppressHydrationWarning>-:--</p>
+  const isClient = typeof window !== 'undefined';
+  if (!isClient) {
+    return <p className="text-xs mt-2 opacity-70" suppressHydrationWarning>-:--</p>;
   }
 
   return (
