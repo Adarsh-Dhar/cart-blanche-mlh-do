@@ -11,25 +11,28 @@ class UCPCommerceSearchTool(BaseTool):
 
     async def run_async(self, *, args: dict[str, Any], tool_context: ToolContext) -> Any:
         query = args.get("query")
-        # Placeholder for UCP Indexer/Gateway URL
-        UCP_GATEWAY_URL = "https://api.ucp.example/v1/search" 
-        
+        # Use the local UCP REST endpoint (update as needed)
+        UCP_GATEWAY_URL = "http://localhost:8182/ucp/v1/search"
         print(f"[UCP_SEARCH] Querying UCP for: {query}")
-        
         try:
             async with httpx.AsyncClient() as client:
-                # Replace with actual UCP search implementation
-                # response = await client.get(UCP_GATEWAY_URL, params={"q": query})
-                # data = response.json()
-                
-                # Mock response structure for UCP
-                return [
-                    {
-                        "name": f"Premium {query}",
-                        "vendor": "UCP Merchant A",
-                        "price": 299.99,
-                        "merchant_address": "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9"
-                    }
-                ]
+                response = await client.get(UCP_GATEWAY_URL, params={"q": query})
+                response.raise_for_status()
+                data = response.json()
+                # Expecting data to be a list of products with required fields
+                # Example expected structure:
+                # [
+                #   {"name": ..., "vendor": ..., "price": ..., "merchant_address": ...},
+                #   ...
+                # ]
+                products = []
+                for item in data:
+                    products.append({
+                        "name": item.get("name"),
+                        "vendor": item.get("vendor"),
+                        "price": item.get("price"),
+                        "merchant_address": item.get("merchant_address")
+                    })
+                return products
         except Exception as e:
             return {"error": f"UCP Search failed: {str(e)}"}

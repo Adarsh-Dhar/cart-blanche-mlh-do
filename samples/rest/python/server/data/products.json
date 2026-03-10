@@ -1,0 +1,52 @@
+[
+  {
+    "@type": "Product",
+    "productID": "BISC-001",
+    "name": "Chocochip Cookies",
+    "sku": "COOKIES-001",
+    "image": ["http://localhost:10999/images/cookies.jpg"],
+    "brand": {
+      "@type": "Brand",
+      "name": "CookieCo"
+    },
+    "offers": {
+      "price": "4.99",
+      "priceCurrency": "USD",
+      "priceSpecification": null,
+      "@type": "Offer",
+      "availability": "https://schema.org/InStock",
+      "itemCondition": "https://schema.org/NewCondition"
+    },
+    "aggregateRating": null,
+    "url": "https://example.com/bisc-001",
+    "description": "Fresly baked Chocochip Cookies",
+    "gtin": "9876543210125",
+    "mpn": "CC-SB-001",
+    "category": "Groceries > Snacks > Cookies & Biscuits"
+  },
+  {
+    "@type": "Product",
+    "productID": "STRAW-001",
+    "name": "Fresh Strawberries",
+    "sku": "STRAW-001",
+    "image": ["http://localhost:10999/images/strawberries.jpg"],
+    "brand": {
+      "@type": "Brand",
+      "name": "FarmFresh"
+    },
+    "offers": {
+      "price": "4.49",
+      "priceCurrency": "USD",
+      "priceSpecification": null,
+      "@type": "Offer",
+      "availability": "https://schema.org/InStock",
+      "itemCondition": "https://schema.org/NewCondition"
+    },
+    "aggregateRating": null,
+    "url": "https://example.com/straw-001",
+    "description": "Sweet and juicy strawberries",
+    "gtin": "9876543210126",
+    "mpn": "ST-FF-001",
+    "category": "Groceries > Fruits > Berries"
+  }
+]

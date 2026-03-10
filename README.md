@@ -95,13 +95,14 @@ chmod +x start_all.sh
 
 ## 🧪 Testing the Flow (Demo Guide)
 
+
 To see the full potential of Cart-Blanche, use the following prompt in the chat interface once the app is running:
 
 > *"I'm looking for high-end noise-canceling headphones for my upcoming travel. My budget is $200. Please find the best options, verify their availability, and prepare a mandate for the one with the best reviews."*
 
 **What to watch for:**
 
-1. The **Shopping Agent** will scout the web and propose an option.
+1. The **Shopping Agent** will query the Universal Commerce Protocol (UCP) decentralized index and propose real product options from UCP merchants.
 2. The **Vault Agent** will encrypt your $200 budget limit using SKALE BITE v2.
 3. The **Merchant Agent** will return a JSON `CartMandate`.
 4. You will be prompted by **MetaMask** to provide an EIP-712 signature.

@@ -1,6 +1,5 @@
 from google.adk.agents import LlmAgent
 from .ucp_search_tool import UCPCommerceSearchTool
-from .premium_reviews_tool import PremiumReviewsTool
 from .vault_agent import vault_agent
 
 class ShoppingAgent:
@@ -28,7 +27,7 @@ class ShoppingAgent:
             
                 If the user says "Approve", "Yes", "Looks good", YOU MUST SILENTLY PASS IT ALONG. Do not generate a plan.
                 """,
-                tools=[PremiumReviewsTool(), UCPCommerceSearchTool()],
+            tools=[UCPCommerceSearchTool()],
             output_key="discovery_data"
         )
 
