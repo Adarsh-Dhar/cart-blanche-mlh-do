@@ -1,0 +1,13 @@
+{
+	"dependencies": {
+		"@prisma/client": "6.19.2",
+		"dotenv": "^17.3.1"
+	},
+	"devDependencies": {
+		"prisma": "6.19.2"
+	},
+	"scripts": {
+		"postinstall": "prisma generate"
+	},
+	"packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8"
+}

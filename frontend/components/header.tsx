@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useMetaMask } from "@/hooks/use-metamask"; // Note: Ensure you are using the correct hook (useX402 if you migrated it!)
 
-import { Geist } from 'next/font/google';
+import { Inter } from 'next/font/google';
 
-const geist = Geist({ subsets: ['latin'] });
+const inter = Inter({ subsets: ['latin'] });
 
 export default function Header() {
   const { connect, address } = useMetaMask();
