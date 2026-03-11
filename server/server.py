@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from google.adk.cli.fast_api import get_fast_api_app
+from fastapi.staticfiles import StaticFiles
 
 # This helper automatically creates /run, /run_sse, and session routes under /apps/{app_name}/
 app: FastAPI = get_fast_api_app(
@@ -8,10 +9,8 @@ app: FastAPI = get_fast_api_app(
     allow_origins=["http://localhost:3000"]  # Adjust as needed for your frontend
 )
 
-
-from fastapi import Request
-from fastapi.responses import JSONResponse
-import httpx
+# Serve the UCP discovery manifest
+app.mount("/.well-known", StaticFiles(directory="server/.well-known"), name="well-known")
 
 @app.get("/health")
 async def health():
