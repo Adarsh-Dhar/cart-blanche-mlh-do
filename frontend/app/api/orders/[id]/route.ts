@@ -4,7 +4,13 @@ import { Prisma, OrderStatus } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
 
-const VALID_STATUSES = Object.values(OrderStatus);
+// Log a warning if OrderStatus is undefined
+if (!OrderStatus) {
+  console.warn("Warning: OrderStatus is undefined. Check Prisma client generation and schema.");
+}
+
+// Ensure OrderStatus is defined before using Object.values
+const VALID_STATUSES = OrderStatus ? Object.values(OrderStatus) : [];
 
 // Valid status transitions to prevent illegal state changes
 const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -141,7 +147,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
 
 
     // Restore stock and delete order + order items in a transaction
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx) => {
       // Restore stock for PENDING orders
       if (existing.status === OrderStatus.PENDING) {
         for (const item of existing.items) {
