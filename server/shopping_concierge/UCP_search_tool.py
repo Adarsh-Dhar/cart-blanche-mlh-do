@@ -36,3 +36,14 @@ class UCPCommerceSearchTool(BaseTool):
                 return products
         except Exception as e:
             return {"error": f"UCP Search failed: {str(e)}"}
+
+    async def run_async_api(self, query: str):
+        async with httpx.AsyncClient() as client:
+            # Point this to your actual frontend API port (usually 3000 for Next.js)
+            response = await client.get(
+                "http://localhost:3000/api/products", 
+                params={"search": query}
+            )
+            data = response.json()
+            # Map the API response fields to the UCP schema expected by the ShoppingAgent
+            return data

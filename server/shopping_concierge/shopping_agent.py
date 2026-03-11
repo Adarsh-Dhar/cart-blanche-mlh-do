@@ -28,7 +28,11 @@ class ShoppingAgent:
                 If the user says "Approve", "Yes", "Looks good", YOU MUST SILENTLY PASS IT ALONG. Do not generate a plan.
                 """,
             tools=[UCPCommerceSearchTool()],
-            output_key="discovery_data"
+            output_key="discovery_data",
+            instructions="""
+            Use `ucp_commerce_search` as the primary source of product data.
+            Verify the `merchant_address` (vendor `pubkey`) for x402 settlement compatibility.
+            """
         )
 
     def process_intent(self, user_intent: dict) -> dict:
