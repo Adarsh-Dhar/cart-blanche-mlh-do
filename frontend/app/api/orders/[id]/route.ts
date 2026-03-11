@@ -1,23 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma, OrderStatus } from "@prisma/client";
+import { $Enums } from "@/lib/generated-prisma";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Log a warning if OrderStatus is undefined
-if (!OrderStatus) {
-  console.warn("Warning: OrderStatus is undefined. Check Prisma client generation and schema.");
-}
 
 // Ensure OrderStatus is defined before using Object.values
-const VALID_STATUSES = OrderStatus ? Object.values(OrderStatus) : [];
+const VALID_STATUSES = $Enums.OrderStatus ? Object.values($Enums.OrderStatus) : [];
 
 // Valid status transitions to prevent illegal state changes
-const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  PENDING:    [OrderStatus.PROCESSING, OrderStatus.CANCELLED],
-  PROCESSING: [OrderStatus.PAID, OrderStatus.CANCELLED],
-  PAID:       [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-  SHIPPED:    [OrderStatus.DELIVERED],
+const STATUS_TRANSITIONS: Record<$Enums.OrderStatus, $Enums.OrderStatus[]> = {
+  PENDING:    [$Enums.OrderStatus.PROCESSING, $Enums.OrderStatus.CANCELLED],
+  PROCESSING: [$Enums.OrderStatus.PAID, $Enums.OrderStatus.CANCELLED],
+  PAID:       [$Enums.OrderStatus.SHIPPED, $Enums.OrderStatus.CANCELLED],
+  SHIPPED:    [$Enums.OrderStatus.DELIVERED],
   DELIVERED:  [],
   CANCELLED:  [],
 };
@@ -135,7 +131,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const deletableStatuses: OrderStatus[] = [OrderStatus.PENDING, OrderStatus.CANCELLED];
+    const deletableStatuses: $Enums.OrderStatus[] = [$Enums.OrderStatus.PENDING, $Enums.OrderStatus.CANCELLED];
     if (!deletableStatuses.includes(existing.status)) {
       return NextResponse.json(
         {
@@ -145,11 +141,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       );
     }
 
-
     // Restore stock and delete order + order items in a transaction
     await prisma.$transaction(async (tx) => {
       // Restore stock for PENDING orders
-      if (existing.status === OrderStatus.PENDING) {
+      if (existing.status === $Enums.OrderStatus.PENDING) {
         for (const item of existing.items) {
           await tx.product.update({
             where: { id: item.productId },
