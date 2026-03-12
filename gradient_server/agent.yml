@@ -1,0 +1,10 @@
+agent_environment: main
+agent_name: cart_blanche
+description: >
+  Cart-Blanche — AI shopping concierge with x402 cryptographic settlement
+  on the SKALE network. Invoke:
+    curl -X POST <gradient_url> \
+         -H "Authorization: Bearer $DIGITALOCEAN_API_TOKEN" \
+         -H "Content-Type: application/json" \
+         -d '{"message": "Buy noise-canceling headphones under $200", "thread_id": "user-session-1"}'
+entrypoint_file: main.py
