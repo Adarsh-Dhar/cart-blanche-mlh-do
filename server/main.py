@@ -67,17 +67,48 @@ async def session_run(user_id: str, session_id: str, payload: Any = Body(None)):
 async def run_sse(payload: Any = Body(None)):
     if payload is None:
         payload = {}
-        
-    context = RequestContext() # Mock context
+
+    # Extract the user message from the ADK-style payload the frontend sends:
+    # { "new_message": { "role": "user", "parts": [{ "text": "..." }] }, "session_id": "..." }
+    user_text = ""
+    new_message = payload.get("new_message", {})
+    parts = new_message.get("parts", [])
+    if parts and isinstance(parts, list):
+        user_text = parts[0].get("text", "")
+    if not user_text:
+        user_text = payload.get("message", "")  # fallback
+
+    session_id = payload.get("session_id", "default-session")
 
     async def event_generator():
-        # Call your main logic
-        # For a true streaming feel, you'd use _graph.astream() here, 
-        # but for now, we'll stream the final result so it shows up.
-        result = await main(payload, context)
-        
-        # SSE format: data must be a string prefixed with 'data: ' and end with two newlines
-        yield f"data: {json.dumps(result)}\n\n"
+        try:
+            langgraph_config = {"configurable": {"thread_id": session_id}}
+
+            async for event in _graph.astream(
+                {"messages": [("user", user_text)]},
+                config=langgraph_config,
+                stream_mode="values",
+            ):
+                messages = event.get("messages", [])
+                if not messages:
+                    continue
+                last = messages[-1]
+                text = last.content if hasattr(last, "content") else str(last)
+
+                from langchain_core.messages import AIMessage as _AI
+                if not isinstance(last, _AI):
+                    continue  # skip echoed human messages
+
+                sse_event = {"content": {"parts": [{"text": text}], "role": "model"}}
+                yield f"data: {json.dumps(sse_event)}\n\n"
+
+            yield "data: [DONE]\n\n"
+
+        except Exception as exc:
+            logger.exception("[run_sse] Streaming error")
+            error_event = {"content": {"parts": [{"text": f"⚠️ Server error: {exc}"}], "role": "model"}}
+            yield f"data: {json.dumps(error_event)}\n\n"
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 # Add the 'server' directory explicitly to the Python path
