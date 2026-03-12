@@ -24,15 +24,62 @@ import sys
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Body, Request
 from gradient_adk import entrypoint, RequestContext
 
 from .graph import build_graph
 from .samples.rest.python.server.db import manager
+from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi.responses import StreamingResponse
+import json
 
 app = FastAPI()
 _graph = build_graph()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For local dev, allow everything
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/apps/shopping_concierge/users/{user_id}/sessions/{session_id}")
+async def session_run(user_id: str, session_id: str, payload: Any = Body(None)):
+    # Initialize payload if empty
+    if payload is None:
+        payload = {}
+    
+    # Inject the session_id as thread_id for LangGraph
+    payload["thread_id"] = session_id
+    
+    # Mock RequestContext to satisfy @entrypoint signature
+    try:
+        context = RequestContext(id=f"local_{session_id}")
+    except:
+        context = RequestContext() 
+    
+    # Call the actual entrypoint logic
+    return await main(payload, context)
+
+@app.post("/run_sse")
+async def run_sse(payload: Any = Body(None)):
+    if payload is None:
+        payload = {}
+        
+    context = RequestContext() # Mock context
+
+    async def event_generator():
+        # Call your main logic
+        # For a true streaming feel, you'd use _graph.astream() here, 
+        # but for now, we'll stream the final result so it shows up.
+        result = await main(payload, context)
+        
+        # SSE format: data must be a string prefixed with 'data: ' and end with two newlines
+        yield f"data: {json.dumps(result)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 # Add the 'server' directory explicitly to the Python path
 server_dir = os.path.dirname(os.path.abspath(__file__))
 if server_dir not in sys.path:
