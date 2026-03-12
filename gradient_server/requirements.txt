@@ -1,0 +1,6 @@
+gradient-adk
+langgraph
+langchain-openai
+prisma
+python-dotenv
+# Add any other specific libs from your old server/requirements.txt
