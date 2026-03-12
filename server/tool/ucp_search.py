@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from db import get_db
+from ..db import get_db
 
 logger = logging.getLogger(__name__)
 

@@ -42,9 +42,9 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 # Local tools — all at the same directory level as graph.py
-from tool.ucp_search import UCPCommerceSearchTool
-from tool.x402_settlement import X402SettlementTool
-from tool.skale_bite import skale_bite          # SkaleBite singleton
+from .tool.ucp_search import UCPCommerceSearchTool
+from .tool.x402_settlement import X402SettlementTool
+from .tool.skale_bite import skale_bite          # SkaleBite singleton
 
 logger = logging.getLogger(__name__)
 

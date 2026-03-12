@@ -26,8 +26,8 @@ from typing import Any
 from dotenv import load_dotenv
 from gradient_adk import entrypoint, RequestContext
 
-from graph import build_graph
-from samples.rest.python.server.db import manager
+from .graph import build_graph
+from .samples.rest.python.server.db import manager
 
 # Add the 'server' directory explicitly to the Python path
 server_dir = os.path.dirname(os.path.abspath(__file__))
