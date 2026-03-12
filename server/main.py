@@ -24,10 +24,14 @@ import sys
 from typing import Any
 
 from dotenv import load_dotenv
+from fastapi import FastAPI
 from gradient_adk import entrypoint, RequestContext
 
 from .graph import build_graph
 from .samples.rest.python.server.db import manager
+
+app = FastAPI()
+_graph = build_graph()
 
 # Add the 'server' directory explicitly to the Python path
 server_dir = os.path.dirname(os.path.abspath(__file__))
