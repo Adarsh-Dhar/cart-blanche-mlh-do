@@ -45,14 +45,17 @@ fi
 # Ensure correct Python venv and npm global bin are in PATH
 export PATH="$PATH:$(npm bin -g)"
 
+# Ensure the script runs from the project root directory
+cd /Users/adarsh/Documents/cart-blanche-nova-ai
+
 # Start backend (FastAPI/ADK) on port 8000
-echo "Starting backend (server.py) on port $BACKEND_PORT..."
-/Users/adarsh/Documents/cart-blanche-nova-ai/.venv/bin/uvicorn server.server:app --host 0.0.0.0 --port $BACKEND_PORT --reload &
+echo "Starting backend (main.py) on port $BACKEND_PORT..."
+/Users/adarsh/Documents/cart-blanche-nova-ai/.venv/bin/uvicorn server.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload &
 BACKEND_PID=$!
 
-# Start payment server (payment_server.py) on port 8001
-echo "Starting payment server (payment_server.py) on port $PAYMENT_PORT..."
-python3 server/payment_server.py > payment_server.log 2>&1 &
+# Start payment server (x402_settlement.py) on port $PAYMENT_PORT
+echo "Starting payment server (x402_settlement.py) on port $PAYMENT_PORT..."
+python3 server/tool/x402_settlement.py > payment_server.log 2>&1 &
 PAYMENT_PID=$!
 
 # Start frontend (Next.js) on port 3000
