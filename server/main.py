@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from gradient_adk import entrypoint, RequestContext
 
 from graph import build_graph
-from samples.rest.python.server.db import disconnect_db
+from samples.rest.python.server.db import manager
 
 # Add the 'server' directory explicitly to the Python path
 server_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,11 +50,20 @@ _graph = build_graph()
 logger.info("[Cart-Blanche] LangGraph compiled and ready.")
 
 # ── Clean DB disconnect on pod shutdown ──────────────────────────────────────
+# REPLACE the _shutdown function (around line 52) with this:
 def _shutdown():
     try:
-        asyncio.get_event_loop().run_until_complete(disconnect_db())
-    except Exception:
-        pass
+        # Get the current loop or create one to run the async close task
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If the loop is already running, create a task
+            loop.create_task(manager.close())
+        else:
+            # If the loop is closed/not running, use run_until_complete
+            loop.run_until_complete(manager.close())
+        logger.info("[Cart-Blanche] Database connections closed safely.")
+    except Exception as e:
+        logger.error(f"[Cart-Blanche] Error during shutdown: {e}")
 
 atexit.register(_shutdown)
 

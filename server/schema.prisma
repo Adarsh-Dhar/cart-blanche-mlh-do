@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
-  engineType = "binary"
+  provider                   = "prisma-client-py"
+  recursive_type_depth       = 5
+  interface                  = "asyncio"
+  enable_experimental_decimal = true
 }
 
 datasource db {
-  provider = "postgresql" // Recommended for production e-commerce
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
