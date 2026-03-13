@@ -1,28 +1,32 @@
-# ── DigitalOcean Gradient platform ──────────────────────────────────────────
-gradient-adk>=0.1.0               # replaces google-adk entirely
-
 # ── LangGraph / LangChain ────────────────────────────────────────────────────
-langgraph>=0.2.0                  # StateGraph, MemorySaver, conditional routing
-langchain-core>=0.2.0             # BaseMessage, HumanMessage, AIMessage
-langchain-openai>=0.1.0           # ChatOpenAI (swap for langchain-anthropic if needed)
-# langchain-anthropic>=0.1.0      # uncomment to use Claude instead of GPT
+langgraph>=0.2.0
+langchain-core>=0.2.0
+langchain-openai>=0.1.0           # ChatOpenAI — used for GitHub Models endpoint
 
 # ── Blockchain / crypto ──────────────────────────────────────────────────────
-web3>=6.0.0                       # SKALE RPC + transaction signing
-eth-account>=0.11.0               # EIP-712 encode_typed_data, Account.recover_message
-ecdsa>=0.18.0                     # BLS key handling in adk_context_utils
+web3>=6.0.0
+eth-account>=0.11.0
+ecdsa>=0.18.0
 
 # ── x402 payment protocol ───────────────────────────────────────────────────
-x402>=0.1.0                       # x402Client, EthAccountSigner, ExactEvmServerScheme
+x402>=0.1.0
 
 # ── HTTP / async ─────────────────────────────────────────────────────────────
-httpx>=0.27.0                     # async HTTP for UCP search + facilitator calls
-fastapi>=0.111.0                  # retained for payment_server.py merchant endpoint
-uvicorn[standard]>=0.29.0         # ASGI runner
+httpx>=0.27.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
 
 # ── Database / ORM ───────────────────────────────────────────────────────────
-prisma>=0.13.0                    # if you retain any Prisma models
+prisma>=0.13.0
 
 # ── Utilities ────────────────────────────────────────────────────────────────
-python-dotenv>=1.0.0              # .env loading (also used by Gradient locally)
-pydantic>=2.0.0                   # used by LangGraph state + FastAPI models
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# ── Required dependencies ─────────────────────────────────────────────────────
+fastapi
+uvicorn
+langchain
+langgraph
+python-dotenv
+httpx

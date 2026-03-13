@@ -1,7 +1,10 @@
 """
-graph.py — Cart-Blanche LangGraph
-==================================
-All nodes now use real Prisma-backed tools.
+graph.py — Cart-Blanche LangGraph (GitHub Models Edition)
+==========================================================
+LLM provider: GitHub Models → GPT-4o-mini
+Endpoint:     https://models.inference.ai.azure.com
+Auth:         GITHUB_TOKEN environment variable (Personal Access Token)
+
 Node data flow:
 
   User message
@@ -32,7 +35,7 @@ import logging
 import os
 import re
 from decimal import Decimal
-from typing import Annotated, Any, Sequence
+from typing import Annotated, Any, Sequence, TypedDict, List
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
@@ -41,24 +44,20 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-# Local tools — all at the same directory level as graph.py
+# Local tools
 from .tool.ucp_search import UCPCommerceSearchTool
 from .tool.x402_settlement import X402SettlementTool
-from .tool.skale_bite import skale_bite          # SkaleBite singleton
+from .tool.skale_bite import skale_bite
 
 logger = logging.getLogger(__name__)
 
-# ── LLM ──────────────────────────────────────────────────────────────────────
-# DigitalOcean Gradient exposes an OpenAI-compatible endpoint.
-# Set GRADIENT_MODEL_ACCESS_KEY in your .env; Gradient injects it automatically
-# on the platform.  For local dev, point base_url at DO's inference gateway.
+# ── LLM: GitHub Models (OpenAI-compatible) ───────────────────────────────────
+# Get your free GitHub PAT at: https://github.com/settings/tokens
+# Add to server/.env:  GITHUB_TOKEN="github_pat_..."
 _llm = ChatOpenAI(
-    model=os.environ.get("GRADIENT_MODEL_NAME", "gpt-4o-mini"),
-    api_key=os.environ.get("GRADIENT_MODEL_ACCESS_KEY", os.environ.get("OPENAI_API_KEY", "")),
-    base_url=os.environ.get(
-        "GRADIENT_BASE_URL",
-        "https://inference.do-ai.run/v1",   # DigitalOcean GenAI gateway
-    ),
+    model=os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+    api_key=os.environ.get("GITHUB_TOKEN", ""),
+    base_url="https://models.inference.ai.azure.com",
     temperature=0.2,
 )
 
@@ -66,15 +65,12 @@ _llm = ChatOpenAI(
 # ── State schema ──────────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):
-    messages:         Annotated[Sequence[BaseMessage], add_messages]
-    project_plan:     str | None
-    product_list:     list[dict] | None
-    cart_mandate:     dict | None
-    encrypted_budget: dict | None
-    receipts:         list[dict] | None
+    messages: Annotated[List[BaseMessage], "The conversation history"]
+    cart: List[dict]
+    steps: int  # Added step counter to prevent infinite loops
 
 
-# ── Shared tool instances (created once at module load) ───────────────────────
+# ── Shared tool instances ─────────────────────────────────────────────────────
 _ucp_tool        = UCPCommerceSearchTool()
 _settlement_tool = X402SettlementTool()
 
@@ -87,9 +83,12 @@ def _last_human(state: AgentState) -> str:
             return msg.content
     return ""
 
+
 def _user_approved(text: str) -> bool:
-    PHRASES = {"looks good", "i approve", "let's do it", "approve",
-               "that's alright", "confirmed", "go ahead", "proceed"}
+    PHRASES = {
+        "looks good", "i approve", "let's do it", "approve",
+        "that's alright", "confirmed", "go ahead", "proceed",
+    }
     low = text.lower()
     return any(p in low for p in PHRASES)
 
@@ -98,10 +97,19 @@ def _user_approved(text: str) -> bool:
 
 async def orchestrator_node(state: AgentState) -> dict:
     """
-    Interprets the user's request.
+    Interprets the user's request via GPT-4o-mini on GitHub Models.
     Outputs a comma-separated list of concrete product items for the
-    Shopping node to query via UCP / Prisma.
+    Shopping node to query.
     """
+    current_steps = state.get("steps", 0)
+    
+    # Safety Check: Stop after 5 loops to prevent token drain
+    if current_steps >= 5:
+        return {
+            "messages": [AIMessage(content="I'm having trouble processing that request. Please try again with more detail.")],
+            "steps": current_steps + 1
+        }
+
     user_text = _last_human(state)
 
     system = (
@@ -114,20 +122,30 @@ async def orchestrator_node(state: AgentState) -> dict:
         {"role": "system", "content": system},
         {"role": "user",   "content": user_text},
     ])
+    
+    # Logic Guard: If the model returns nothing, don't let it loop
+    if not response.content and not response.tool_calls:
+        return {
+            "messages": [AIMessage(content="I didn't understand that. Could you rephrase your request?")],
+            "steps": current_steps + 1
+        }
+
     plan = response.content.strip().strip(".")
     logger.info("[Orchestrator] plan='%s'", plan[:140])
 
     return {
         "project_plan": plan,
-        "messages": [AIMessage(content=f"🔎 Planning search for: **{plan}**", name="Orchestrator")],
+        "messages": [AIMessage(
+            content=f"🔎 Planning search for: **{plan}**",
+            name="Orchestrator",
+        )],
+        "steps": current_steps + 1
     }
 
 
 async def shopping_node(state: AgentState) -> dict:
     """
     Queries the Prisma DB via UCPCommerceSearchTool for each item in the plan.
-    Attaches product_id and vendor_id to each result so settlement can write
-    proper OrderItem rows.
     """
     plan: str = state.get("project_plan") or _last_human(state)
     items = [i.strip() for i in plan.split(",") if i.strip()]
@@ -145,7 +163,6 @@ async def shopping_node(state: AgentState) -> dict:
         except Exception as exc:
             logger.warning("[Shopping] UCP query '%s' failed: %s", item, exc)
 
-    # Format a human-readable product table for the user
     if all_products:
         lines = [f"| {'Product':<40} | {'Vendor':<25} | {'Price':>8} |"]
         lines.append(f"|{'-'*42}|{'-'*27}|{'-'*10}|")
@@ -175,14 +192,12 @@ async def shopping_node(state: AgentState) -> dict:
 
 async def merchant_node(state: AgentState) -> dict:
     """
-    Waits for explicit user approval, then builds the CartMandate JSON.
-    Uses real product_id and vendor pubkey (merchant_address) from Prisma data.
+    Awaits explicit user approval, then builds the CartMandate JSON.
     """
     user_text = _last_human(state)
     products  = state.get("product_list") or []
 
     if not _user_approved(user_text):
-        # Re-show the cart so the user can review again
         product_lines = "\n".join(
             f"  • **{p['name']}** — ${p['price']:.2f} ({p['vendor']})"
             for p in products
@@ -196,7 +211,6 @@ async def merchant_node(state: AgentState) -> dict:
             name="MerchantAgent",
         )]}
 
-    # Build the mandate using real Prisma data
     total_usdc_units = sum(
         int(Decimal(str(p["price"])) * 1_000_000) for p in products
     )
@@ -204,17 +218,15 @@ async def merchant_node(state: AgentState) -> dict:
     mandate = {
         "total_budget_amount": total_usdc_units,
         "currency":            "USDC",
-        "chain_id":            324_705_682,   # SKALE Base Sepolia
+        "chain_id":            324_705_682,
         "merchant_address":    products[0]["merchant_address"] if products else
                                "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9",
         "amount":              total_usdc_units,
         "merchants": [
             {
                 "name":             p["name"],
-                # Use the real Vendor.pubkey from Prisma as payment destination
                 "merchant_address": p["merchant_address"],
                 "amount":           int(Decimal(str(p["price"])) * 1_000_000),
-                # Carry IDs forward so settlement can write OrderItems
                 "product_id":       p.get("product_id"),
                 "vendor_id":        p.get("vendor_id"),
             }
@@ -256,10 +268,8 @@ async def vault_node(state: AgentState) -> dict:
 
 async def settlement_node(state: AgentState) -> dict:
     """
-    Detects a MetaMask EIP-712 signature in the user's message, then:
-      1. Verifies signature on-chain (SKALE)
-      2. Executes multi-vendor batch TX
-      3. Writes Order + OrderItems to Prisma
+    Detects a MetaMask EIP-712 signature, verifies it, executes on-chain
+    settlement, and records the order in Prisma.
     """
     user_text = _last_human(state)
     mandate   = state.get("cart_mandate")
@@ -275,9 +285,9 @@ async def settlement_node(state: AgentState) -> dict:
         result = await _settlement_tool.run_async(
             args={
                 "payment_mandate": {
-                    "signature":          signature,
-                    "cart_mandate":       mandate,
-                    "user_wallet_address": None,  # recovered from signature on-chain
+                    "signature":           signature,
+                    "cart_mandate":        mandate,
+                    "user_wallet_address": None,
                 }
             },
             tool_context=None,
@@ -299,7 +309,7 @@ async def settlement_node(state: AgentState) -> dict:
     except Exception as exc:
         logger.exception("[Settlement] Failed.")
         return {"messages": [AIMessage(
-            content=f"❌ Settlement error: {exc}", name="PaymentProcessor"
+            content=f"❌ Settlement error: {exc}", name="PaymentProcessor",
         )]}
 
 
@@ -308,23 +318,18 @@ async def settlement_node(state: AgentState) -> dict:
 def _router(state: AgentState) -> str:
     user_text = _last_human(state)
 
-    # If user pasted a 0x signature AND mandate exists → settle
     if state.get("cart_mandate") and re.search(r"0x[a-fA-F0-9]{130,}", user_text):
         return "settlement"
 
-    # Mandate built but budget not yet encrypted
     if state.get("cart_mandate") and not state.get("encrypted_budget"):
         return "vault"
 
-    # Products in state → show to user / await approval
     if state.get("product_list") is not None:
         return "merchant"
 
-    # Plan exists → run UCP search
     if state.get("project_plan"):
         return "shopping"
 
-    # Fresh conversation → orchestrate
     return "orchestrator"
 
 
@@ -350,12 +355,17 @@ def build_graph() -> Any:
 
     builder.set_conditional_entry_point(_router, all_routes)
 
-    # Every non-terminal node re-routes after completing
     for node in ("orchestrator", "shopping", "merchant", "vault"):
         builder.add_conditional_edges(node, _router, all_routes)
 
     builder.add_edge("settlement", END)
 
-    # MemorySaver = in-process per thread_id isolation.
-    # Swap for SqliteSaver / AsyncPostgresSaver in production.
     return builder.compile(checkpointer=MemorySaver())
+
+
+# ── Orchestrator logic ───────────────────────────────────────────────────────
+
+def orchestrator(state: AgentState):
+    # Determine if user is searching or paying
+    response = llm.invoke(state["messages"])
+    return {"messages": [response]}
