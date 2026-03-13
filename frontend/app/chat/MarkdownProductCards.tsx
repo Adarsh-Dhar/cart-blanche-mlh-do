@@ -6,7 +6,7 @@ interface MarkdownProductCardsProps {
   children: string;
 }
 
-export function MarkdownProductCards({ children }: MarkdownProductCardsProps) {
+export default function MarkdownProductCards({ children }: MarkdownProductCardsProps) {
   return (
     <ReactMarkdown
       components={{

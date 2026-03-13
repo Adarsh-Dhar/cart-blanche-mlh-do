@@ -22,12 +22,20 @@ class AgentState(TypedDict):
     # ── Conversation history ──────────────────────────────────────────────────
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
-    # ── Orchestrator inputs ──────────────────────────────────────────────────────
-    query: str | None  # User's query text
+    # ── Orchestrator inputs ───────────────────────────────────────────────────
+    query: str | None  # Raw user message text
 
     # ── Orchestrator outputs ──────────────────────────────────────────────────
-    project_plan: str | None    # comma-separated product search terms
-    budget_usd:   float | None  # optional spend ceiling parsed from user message
+    project_plan: str | None    # semicolon-separated "Category: term, term" plan
+    budget_usd:   float | None  # optional USD spend ceiling
+
+    # ── Per-category tier preferences ─────────────────────────────────────────
+    # Keyed by the category name used in project_plan (e.g. "Bags", "Stationery").
+    # Values: "premium" | "budget" | "auto"
+    # Set by the Orchestrator when the user expresses preference in their message,
+    # e.g. "I want a nice backpack but save on stationery"
+    #   → {"Bags": "premium", "Stationery": "budget"}
+    item_preferences: dict | None
 
     # ── Shopping Agent output ─────────────────────────────────────────────────
     # None  = not yet searched

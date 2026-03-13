@@ -1,17 +1,109 @@
+"""
+agents/shopping.py — Shopping Agent (v2)
+=========================================
+Key improvements over v1:
+  - Searches per TERM (not per category group), so "Stationery: notebook, pen,
+    pencil, highlighter" yields up to 4 separate products.
+  - Normalises plural search terms (notebooks→notebook, pens→pen) so they
+    actually match DB product names like "Notebook (3-Pack)" and "Gel Pen Set".
+  - Respects per-category preferences ("premium" / "budget") stored in
+    AgentState.item_preferences.
+  - Returns a structured ```json product_list block so the frontend can render
+    interactive product cards with deep-links to /products/[id].
+"""
+
 from __future__ import annotations
+
+import json
 import logging
+
 from langchain_core.messages import AIMessage
+
 from server.state import AgentState, MAX_STEPS
 from server.tool.ucp_search import UCPCommerceSearchTool
 
 logger = logging.getLogger(__name__)
-
 _ucp_tool = UCPCommerceSearchTool()
+
+
+# ── Term normalisation ─────────────────────────────────────────────────────────
+
+def _search_variants(term: str) -> list[str]:
+    """
+    Return an ordered list of search variants for *term*, singular first.
+
+    Examples:
+      "notebooks"    → ["notebook", "notebooks"]
+      "highlighters" → ["highlighter", "highlighters"]
+      "pens"         → ["pen", "pens"]
+      "backpack"     → ["backpack"]   (no change — already singular)
+    """
+    term = term.strip().lower()
+    variants: list[str] = []
+
+    # Strip common English plural suffixes to expose the stem
+    plural_rules = [
+        ("ighters", "ighter"),   # highlighters → highlighter
+        ("ifiers", "ifier"),
+        ("ifiers", "ify"),
+        ("iers",   "ier"),
+        ("ches",   "ch"),        # watches → watch
+        ("shes",   "sh"),        # dishes  → dish
+        ("xes",    "x"),         # boxes   → box
+        ("ses",    "s"),         # glasses → glass
+        ("ies",    "y"),         # batteries → battery
+        ("ves",    "f"),         # knives → knife
+        ("s",      ""),          # notebooks → notebook, pens → pen
+    ]
+
+    singular: str | None = None
+    for suffix, replacement in plural_rules:
+        if term.endswith(suffix) and len(term) - len(suffix) >= 2:
+            singular = term[: -len(suffix)] + replacement
+            break
+
+    if singular and singular != term:
+        variants = [singular, term]   # singular first for better DB hits
+    else:
+        variants = [term]
+
+    return variants
+
+
+# ── Single-term async search ───────────────────────────────────────────────────
+
+async def _search_term(term: str) -> list[dict]:
+    """
+    Search the DB for *term*, trying singular variant first.
+    Returns results sorted price-ascending (cheapest → priciest).
+    """
+    seen_ids: set[str] = set()
+    all_results: list[dict] = []
+
+    for variant in _search_variants(term):
+        try:
+            results = await _ucp_tool.run_async(
+                args={"query": variant}, tool_context=None
+            )
+            for r in results:
+                if r["id"] not in seen_ids:
+                    seen_ids.add(r["id"])
+                    all_results.append(r)
+        except Exception as exc:
+            logger.warning("[Shopping] Search failed for '%s': %s", variant, exc)
+
+        if all_results:
+            break  # stop as soon as any variant yields results
+
+    return sorted(all_results, key=lambda x: x["price"])
+
+
+# ── Node ───────────────────────────────────────────────────────────────────────
 
 async def shopping_node(state: AgentState) -> dict:
     print("\n--- SHOPPING AGENT ---")
     steps = state.get("steps", 0)
-    
+
     if steps >= MAX_STEPS:
         return {
             "product_list": [],
@@ -23,139 +115,181 @@ async def shopping_node(state: AgentState) -> dict:
             )],
         }
 
-    plan = state.get("project_plan", "")
-    budget = state.get("budget_usd", 0.0) or 0.0
-    
+    plan             = state.get("project_plan", "")
+    budget           = state.get("budget_usd",  0.0) or 0.0
+    item_preferences = state.get("item_preferences") or {}
+
     if not plan:
-        print("No plan provided to shopping agent.")
         return {
             "product_list": [],
             "_shopped": True,
             "steps": steps + 1,
             "messages": [AIMessage(
                 content="⚠️ No search plan found. Please describe what you need.",
-                name="ShoppingAgent"
-            )]
+                name="ShoppingAgent",
+            )],
         }
 
-    print(f"Executing plan: {plan}")
-    print(f"Total Budget: ${budget}")
+    print(f"Plan: {plan}")
+    print(f"Budget: ${budget}")
+    print(f"Preferences: {item_preferences}")
 
     categories = [c.strip() for c in plan.split(";") if c.strip()]
-    category_options = {}
 
-    # 1. Gather all available options per category
+    # ── 1. Collect options for every individual search term ────────────────
+    # term_slots = list of {category, term, options: [...]}
+    term_slots: list[dict] = []
+
     for cat_str in categories:
         if ":" not in cat_str:
             continue
-            
         cat_name, terms_str = cat_str.split(":", 1)
-        search_terms = [t.strip() for t in terms_str.split(",")]
-        
-        print(f"\nProcessing Category: {cat_name}")
-        category_results = []
-        
-        for term in search_terms:
-            try:
-                results = await _ucp_tool.run_async(args={"query": term}, tool_context=None)
-                if results:
-                    category_results.extend(results)
-            except Exception as exc:
-                print(f"  Warning: Query '{term}' failed: {exc}")
+        cat_name     = cat_name.strip()
+        search_terms = [t.strip() for t in terms_str.split(",") if t.strip()]
 
-        if not category_results:
-            print(f"  No products found for category '{cat_name}'.")
+        for term in search_terms:
+            print(f"  Searching '{term}' ({cat_name})…")
+            options = await _search_term(term)
+            if options:
+                print(f"    → {len(options)} result(s)")
+                term_slots.append({
+                    "category": cat_name,
+                    "term":     term,
+                    "options":  options,
+                })
+            else:
+                print(f"    → no results")
+
+    if not term_slots:
+        return {
+            "product_list": [],
+            "_shopped": True,
+            "steps": steps + 1,
+            "messages": [AIMessage(
+                content=(
+                    "⚠️ No in-stock products found for your request.\n\n"
+                    "Try more generic terms — e.g. *'backpack'* instead of a brand name, "
+                    "or *'pen'* instead of *'ballpoint pen'*."
+                ),
+                name="ShoppingAgent",
+            )],
+        }
+
+    # ── 2. Initial selection: one unique product per term ─────────────────
+    # Priority: respect per-category preference; default = cheapest.
+    # Globally tracked selected_ids prevents the same product appearing twice.
+
+    selected: list[dict]   = []   # [{slot, product}]
+    selected_ids: set[str] = set()
+
+    for slot in term_slots:
+        cat_name = slot["category"]
+        pref     = item_preferences.get(cat_name, "auto").lower()
+        available = [p for p in slot["options"] if p["id"] not in selected_ids]
+
+        if not available:
+            logger.info(
+                "[Shopping] Skipping '%s' — all options already in cart.", slot["term"]
+            )
             continue
 
-        # Dedup by product ID
-        unique_results = []
-        seen_ids = set()
-        for p in category_results:
-            if p["id"] not in seen_ids:
-                seen_ids.add(p["id"])
-                unique_results.append(p)
-
-        # Sort by price (cheapest to most expensive)
-        unique_results.sort(key=lambda x: x["price"])
-        category_options[cat_name] = unique_results
-
-    # 2. Base Selection: Pick the cheapest item for each category to ensure a COMPLETE list
-    selected_items = {}
-    current_total = 0.0
-    
-    for cat_name, options in category_options.items():
-        cheapest = options[0]
-        # Try to avoid blowing the budget on the very first pass
-        if budget > 0 and current_total + cheapest["price"] > budget:
-            if current_total == 0:
-                # Add at least one item even if it exceeds the budget
-                selected_items[cat_name] = cheapest
-                current_total += cheapest["price"]
-            else:
-                print(f"  Warning: Skipping '{cat_name}' baseline to stay under budget.")
+        if pref == "premium":
+            chosen = available[-1]   # most expensive
+        elif pref == "budget":
+            chosen = available[0]    # cheapest
         else:
-            selected_items[cat_name] = cheapest
-            current_total += cheapest["price"]
+            chosen = available[0]    # cheapest by default (upgrade loop below)
 
-    # 3. Upgrade Loop: Maximize the cart quality by upgrading items if we have remaining budget
+        selected.append({"slot": slot, "product": chosen})
+        selected_ids.add(chosen["id"])
+
+    current_total: float = sum(s["product"]["price"] for s in selected)
+
+    # ── 3. Budget upgrade loop: swap to higher tiers if headroom allows ───
     if budget > 0 and current_total < budget:
         made_upgrade = True
         while made_upgrade:
             made_upgrade = False
-            for cat_name in list(selected_items.keys()):
-                options = category_options[cat_name]
-                current_item = selected_items[cat_name]
-                
-                # Find the index of the currently selected item
-                current_idx = next(i for i, p in enumerate(options) if p["id"] == current_item["id"])
-                
-                # Check if there is a higher-tier (more expensive) option in this category
-                if current_idx + 1 < len(options):
-                    next_item = options[current_idx + 1]
-                    price_diff = next_item["price"] - current_item["price"]
-                    
-                    # If the upgrade fits in the budget, swap it in and update the total
-                    if current_total + price_diff <= budget:
-                        selected_items[cat_name] = next_item
-                        current_total += price_diff
-                        made_upgrade = True
+            for item in selected:
+                cat_name = item["slot"]["category"]
+                pref     = item_preferences.get(cat_name, "auto").lower()
+                if pref == "budget":
+                    continue  # user explicitly wants to save here
 
-    final_selection = list(selected_items.values())
-    print(f"\nFinished Shopping. Selected {len(final_selection)} items. Total: ${current_total:.2f}")
+                options  = item["slot"]["options"]
+                current  = item["product"]
+                cur_idx  = next(
+                    (i for i, p in enumerate(options) if p["id"] == current["id"]), 0
+                )
 
-    # 4. Format the response for the UI
-    if not final_selection:
-        reply = (
-            "⚠️ No in-stock products found for your request.\n\n"
-            "Try broadening your search — for example, use generic terms "
-            "like *'headphones'* instead of a specific brand."
+                if cur_idx + 1 >= len(options):
+                    continue
+
+                next_item  = options[cur_idx + 1]
+                # Skip if another term already claimed this product
+                if next_item["id"] in selected_ids and next_item["id"] != current["id"]:
+                    continue
+
+                price_diff = next_item["price"] - current["price"]
+                if current_total + price_diff <= budget:
+                    selected_ids.discard(current["id"])
+                    item["product"] = next_item
+                    selected_ids.add(next_item["id"])
+                    current_total += price_diff
+                    made_upgrade = True
+
+    # ── 4. Build final product list ────────────────────────────────────────
+    final_products: list[dict] = [s["product"] for s in selected]
+    current_total = round(sum(p["price"] for p in final_products), 2)
+
+    print(
+        f"\n[Shopping] Done — {len(final_products)} item(s) selected, "
+        f"total ${current_total:.2f}"
+    )
+
+    # ── 5. Structured JSON payload for the frontend ProductListCard ────────
+    product_payload = {
+        "type": "product_list",
+        "products": [
+            {
+                "id":               p["id"],
+                "product_id":       p.get("product_id", ""),
+                "name":             p["name"],
+                "price":            round(p["price"], 2),
+                "currency":         p.get("currency", "USD"),
+                "vendor":           p.get("vendor", "Unknown"),
+                "vendor_id":        p.get("vendor_id", ""),
+                "merchant_address": p.get("merchant_address", ""),
+                "category":         p.get("category", ""),
+                "stock":            p.get("stock", 0),
+                "images":           p.get("images", []),
+            }
+            for p in final_products
+        ],
+        "total":  current_total,
+        "budget": budget,
+    }
+
+    budget_note = ""
+    if budget > 0 and current_total > budget:
+        budget_note = (
+            f"\n\n⚠️ **Budget note:** Total (${current_total:.2f}) slightly exceeds "
+            f"your ${budget:.0f} budget — I picked the most affordable options available."
         )
-    else:
-        lines = [f"| {'#':<3} | {'Product':<38} | {'Vendor':<22} | {'Price':>8} |"]
-        lines.append(f"|{'-'*5}|{'-'*40}|{'-'*24}|{'-'*10}|")
-        for i, p in enumerate(final_selection, 1):
-            vendor_name = p.get('vendor', 'Unknown')
-            lines.append(
-                f"| {i:<3} | {p['name'][:38]:<38} | "
-                f"{vendor_name[:22]:<22} | ${p['price']:>7.2f} |"
-            )
-        table = "\n".join(lines)
-        
-        budget_warning = ""
-        if budget > 0 and current_total > budget:
-            budget_warning = f"\n\n⚠️ **Budget note:** The total exceeds your stated budget of **${budget:.0f}**. I selected the most affordable options available."
-            
-        reply = (
-            f"Found **{len(final_selection)}** optimized product(s) matching your request:\n\n"
-            f"```\n{table}\n```\n\n"
-            f"**Estimated total: ${current_total:.2f}**{budget_warning}\n\n"
-            "Reply **'Looks good'** to confirm this cart and proceed to payment, "
-            "or describe what you'd like to change."
-        )
+
+    reply = (
+        f"Found **{len(final_products)}** item(s) for you.\n\n"
+        f"**Estimated total: ${current_total:.2f}**"
+        f"{budget_note}\n\n"
+        "Reply **'Looks good'** to confirm and proceed to payment, "
+        "or tell me what to change — e.g. *'I want a premium backpack'* "
+        "or *'find cheaper stationery'*.\n\n"
+        f"```json\n{json.dumps(product_payload, indent=2)}\n```"
+    )
 
     return {
-        "product_list": final_selection,
-        "_shopped": True,
-        "steps": steps + 1,
-        "messages": [AIMessage(content=reply, name="ShoppingAgent")]
+        "product_list": final_products,
+        "_shopped":     True,
+        "steps":        steps + 1,
+        "messages":     [AIMessage(content=reply, name="ShoppingAgent")],
     }
