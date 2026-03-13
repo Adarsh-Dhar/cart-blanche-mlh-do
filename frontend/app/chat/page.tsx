@@ -160,7 +160,7 @@ export default function ChatPage() {
     const reader  = res.body!.getReader();
     const decoder = new TextDecoder();
     let currentContent = "";
-    let currentAgent   = "Agent";
+    let currentAgent   = "Agent1";
 
     while (true) {
       const { value, done } = await reader.read();
@@ -318,8 +318,8 @@ export default function ChatPage() {
                     Describe what you need. I'll analyze intent, search live inventory, optimize your cart, and handle crypto-settlement securely.
                   </p>
                   <div className="mt-8 flex gap-3 justify-center flex-wrap">
-                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Build me a home office setup under $800")}>
-                      "Home office under $800"
+                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me stuff i need for my first day of school under $800")}>
+                      "Back to school $800"
                     </Badge>
                     <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me camping gear")}>
                       "Buy me camping gear"

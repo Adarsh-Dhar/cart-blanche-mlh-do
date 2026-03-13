@@ -277,15 +277,7 @@ async def shopping_node(state: AgentState) -> dict:
             f"your ${budget:.0f} budget — I picked the most affordable options available."
         )
 
-    reply = (
-        f"Found **{len(final_products)}** item(s) for you.\n\n"
-        f"**Estimated total: ${current_total:.2f}**"
-        f"{budget_note}\n\n"
-        "Reply **'Looks good'** to confirm and proceed to payment, "
-        "or tell me what to change — e.g. *'I want a premium backpack'* "
-        "or *'find cheaper stationery'*.\n\n"
-        f"```json\n{json.dumps(product_payload, indent=2)}\n```"
-    )
+    reply = f"```json\n{json.dumps(product_payload, indent=2)}\n```"
 
     return {
         "product_list": final_products,

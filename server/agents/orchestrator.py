@@ -124,10 +124,10 @@ async def orchestrator_node(state: AgentState) -> dict:
         pref_notes = f"  _(preferences: {', '.join(parts)})_"
 
     return {
-        "query":            query,
+        # "query":            query,
         "project_plan":     plan,
-        "budget_usd":       budget,
-        "item_preferences": preferences,
+        # "budget_usd":       budget,
+        # "item_preferences": preferences,
         "_orchestrated":    True,
         "_shopped":         False,
         "product_list":     None,

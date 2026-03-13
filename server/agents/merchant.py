@@ -97,8 +97,4 @@ async def merchant_node(state: AgentState) -> dict:
     return {
         "cart_mandate": cart_mandate,
         "_merchant_reviewed": True,
-        "messages": [AIMessage(
-            content=table,
-            name="MerchantAgent",
-        )],
     }

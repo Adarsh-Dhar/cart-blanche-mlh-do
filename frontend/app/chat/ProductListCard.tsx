@@ -98,9 +98,6 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
       {/* ── Header ── */}
       <div className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted/30">
         <div className="flex items-center gap-3">
-          {/* <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <ShoppingBag className="w-4 h-4 text-primary" />
-          </div> */}
           <div>
             <p className="text-sm font-bold text-foreground">Your Cart</p>
             <p className="text-[11px] text-muted-foreground">{products.length} items · ready to buy</p>
