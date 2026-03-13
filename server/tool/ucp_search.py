@@ -113,3 +113,11 @@ class UCPCommerceSearchTool:
             "[UCPSearch] '%s' → %d result(s) (in-stock, price-asc).", query, len(results)
         )
         return results
+
+
+async def search_ucp(query: str) -> list[dict[str, Any]]:
+    """
+    Wrapper function for UCPCommerceSearchTool.run_async to provide a simpler interface.
+    """
+    tool = UCPCommerceSearchTool()
+    return await tool.run_async(args={"query": query}, tool_context=None)

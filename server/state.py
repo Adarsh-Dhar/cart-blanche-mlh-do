@@ -22,6 +22,9 @@ class AgentState(TypedDict):
     # ── Conversation history ──────────────────────────────────────────────────
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
+    # ── Orchestrator inputs ──────────────────────────────────────────────────────
+    query: str | None  # User's query text
+
     # ── Orchestrator outputs ──────────────────────────────────────────────────
     project_plan: str | None    # comma-separated product search terms
     budget_usd:   float | None  # optional spend ceiling parsed from user message
