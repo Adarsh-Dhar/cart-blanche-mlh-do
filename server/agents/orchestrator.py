@@ -7,8 +7,8 @@ Purpose:
       * A comma-separated list of concrete products to search for.
       * An optional budget ceiling (e.g. "$200") parsed from natural language.
   - Resets all downstream state so the graph starts fresh every new request.
-  - Sets `_orchestrated = True` so the router never re-runs this node in the
-    same turn.
+  - Sets `_orchestrated = True` so the post-node router never re-runs this
+    node in the same turn.
 
 Output state keys set:
   project_plan, budget_usd, product_list (reset), cart_mandate (reset),
@@ -18,23 +18,14 @@ Output state keys set:
 from __future__ import annotations
 
 import logging
-import os
 import re
 
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 
+from ..llm import llm
 from ..state import AgentState, MAX_STEPS
 
 logger = logging.getLogger(__name__)
-
-# ── LLM (shared across agents that need it) ───────────────────────────────────
-llm = ChatOpenAI(
-    model=os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
-    api_key=os.environ.get("GITHUB_TOKEN", ""),
-    base_url="https://models.inference.ai.azure.com",
-    temperature=0.2,
-)
 
 _SYSTEM_PROMPT = """\
 You are the Lead Project Orchestrator for Cart-Blanche, an AI shopping concierge.
@@ -45,7 +36,7 @@ Given the user's request you must extract two things:
    Example: "noise cancelling headphones, USB-C hub, backpack"
 
 2. BUDGET (optional): If the user mentions a spending limit, extract it as a
-   plain number in USD.  If no budget is mentioned output 0.
+   plain number in USD. If no budget is mentioned output 0.
 
 Respond ONLY in this exact format — no preamble, no explanation:
 PRODUCTS: <comma-separated list>
@@ -54,7 +45,7 @@ BUDGET: <number or 0>
 
 
 def _parse_response(text: str) -> tuple[str, float]:
-    """Parse the LLM response into (plan, budget_usd)."""
+    """Parse the two-line LLM response into (plan_string, budget_float)."""
     plan   = ""
     budget = 0.0
     for line in text.splitlines():
@@ -62,7 +53,7 @@ def _parse_response(text: str) -> tuple[str, float]:
         if line.upper().startswith("PRODUCTS:"):
             plan = line.split(":", 1)[1].strip().strip(".")
         elif line.upper().startswith("BUDGET:"):
-            raw = line.split(":", 1)[1].strip()
+            raw    = line.split(":", 1)[1].strip()
             digits = re.sub(r"[^\d.]", "", raw)
             try:
                 budget = float(digits) if digits else 0.0
@@ -74,15 +65,15 @@ def _parse_response(text: str) -> tuple[str, float]:
 async def orchestrator_node(state: AgentState) -> dict:
     steps = state.get("steps", 0)
 
-    # ── Hard stop ────────────────────────────────────────────────────────────
+    # ── Hard stop ─────────────────────────────────────────────────────────────
     if steps >= MAX_STEPS:
         return {
             "messages": [AIMessage(
-                content="⚠️ I seem to be stuck. Could you rephrase your request?",
+                content="⚠️ I seem to be stuck in a loop. Could you rephrase your request?",
                 name="Orchestrator",
             )],
-            "steps": steps + 1,
-            "_orchestrated": True,
+            "steps":          steps + 1,
+            "_orchestrated":  True,
         }
 
     # ── Extract last human message ────────────────────────────────────────────
@@ -98,11 +89,11 @@ async def orchestrator_node(state: AgentState) -> dict:
                 content="I didn't receive a message. What are you looking for today?",
                 name="Orchestrator",
             )],
-            "steps": steps + 1,
+            "steps":         steps + 1,
             "_orchestrated": True,
         }
 
-    # ── Call LLM ─────────────────────────────────────────────────────────────
+    # ── Call LLM ──────────────────────────────────────────────────────────────
     try:
         response = await llm.ainvoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
@@ -116,7 +107,7 @@ async def orchestrator_node(state: AgentState) -> dict:
                 content=f"⚠️ Could not reach the AI model. Please try again.\n\nError: {exc}",
                 name="Orchestrator",
             )],
-            "steps": steps + 1,
+            "steps":         steps + 1,
             "_orchestrated": True,
         }
 
@@ -126,12 +117,12 @@ async def orchestrator_node(state: AgentState) -> dict:
             "messages": [AIMessage(
                 content=(
                     "I couldn't identify specific products from your message. "
-                    "Could you try something like: *'I need wireless headphones and a "
-                    "laptop stand under $300'*?"
+                    "Could you try something like: *'I need wireless headphones "
+                    "and a laptop stand under $300'*?"
                 ),
                 name="Orchestrator",
             )],
-            "steps": steps + 1,
+            "steps":         steps + 1,
             "_orchestrated": True,
         }
 
@@ -139,19 +130,16 @@ async def orchestrator_node(state: AgentState) -> dict:
     logger.info("[Orchestrator] plan='%s' budget=$%.2f", plan[:140], budget_usd)
 
     return {
-        # ── New plan ──────────────────────────────────────────────────────────
-        "project_plan":    plan,
-        "budget_usd":      budget_usd,
-        # ── Reset all downstream state for this fresh turn ────────────────────
-        "product_list":    None,
-        "cart_mandate":    None,
+        "project_plan":     plan,
+        "budget_usd":       budget_usd,
+        # Reset all downstream state for this fresh turn
+        "product_list":     None,
+        "cart_mandate":     None,
         "encrypted_budget": None,
-        "receipts":        None,
-        # ── Phase flags ───────────────────────────────────────────────────────
-        "_orchestrated":   True,
-        "_shopped":        False,
-        "steps":           steps + 1,
-        # ── User-facing message ───────────────────────────────────────────────
+        "receipts":         None,
+        "_orchestrated":    True,
+        "_shopped":         False,
+        "steps":            steps + 1,
         "messages": [AIMessage(
             content=f"🔎 Searching for: **{plan}**{budget_note}",
             name="Orchestrator",

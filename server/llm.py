@@ -1,13 +1,28 @@
-from langchain_openai import ChatOpenAI
+"""
+llm.py — Shared LLM instance (GitHub Models / GPT-4o-mini)
+============================================================
+Import this anywhere you need the LLM:
+
+    from .llm import llm
+    response = await llm.ainvoke([...])
+
+Requires GITHUB_TOKEN in environment. main.py loads .env before any
+local imports so this module always sees the correct value.
+
+NOTE: `api_key` and `base_url` are the correct kwargs for
+langchain-openai ≥ 0.1.  The old `openai_api_key` / `openai_api_base`
+aliases are deprecated and emit warnings in recent versions.
+"""
+
+from __future__ import annotations
+
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+from langchain_openai import ChatOpenAI
 
-# Initialize gpt-4o-mini via GitHub Models
 llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    openai_api_key=os.environ["GITHUB_TOKEN"],
-    openai_api_base="https://models.inference.ai.azure.com",
-    temperature=0  # Change this from 0.2 to 0 for stricter adherence to the search list format
+    model=os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+    api_key=os.environ.get("GITHUB_TOKEN", ""),          # NOT openai_api_key
+    base_url="https://models.inference.ai.azure.com",    # NOT openai_api_base
+    temperature=0.0,   # maximum determinism for structured extraction
 )

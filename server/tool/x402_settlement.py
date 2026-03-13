@@ -1,5 +1,5 @@
 """
-x402_settlement_tool.py — Production on-chain settlement + Prisma order recording
+tool/x402_settlement.py — Production on-chain settlement + Prisma order recording
 ===================================================================================
 Payment destination for every vendor comes EXCLUSIVELY from Vendor.pubkey
 stored in the Prisma DB — no hardcoded wallet lists, no random selection.
@@ -28,7 +28,6 @@ from ..db import get_db
 
 logger = logging.getLogger(__name__)
 
-# SKALE Base Sepolia RPC — override via env var for mainnet migration
 SKALE_RPC_URL = os.environ.get(
     "SKALE_RPC_URL",
     "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
@@ -48,7 +47,7 @@ class X402SettlementTool:
         self,
         *,
         args: dict[str, Any],
-        tool_context: Any,  # None when called directly from graph nodes
+        tool_context: Any,
     ) -> dict[str, Any]:
 
         from web3 import Web3
@@ -73,7 +72,7 @@ class X402SettlementTool:
         if not merchants:
             raise ValueError("cart_mandate.merchants is empty — nothing to settle.")
 
-        # ── 2. Validate all merchant addresses come from DB (non-empty, valid hex) ──
+        # ── 2. Validate all merchant addresses ───────────────────────────────
         for i, vendor in enumerate(merchants):
             addr = vendor.get("merchant_address", "")
             if not addr or addr == "0x0000000000000000000000000000000000000000":
@@ -83,7 +82,13 @@ class X402SettlementTool:
                 )
 
         # ── 3. EIP-712 signature verification ────────────────────────────────
-        chain_id = cart_mandate.get("chain_id", SKALE_CHAIN_ID)
+        chain_id         = cart_mandate.get("chain_id", SKALE_CHAIN_ID)
+        primary_merchant = merchants[0]["merchant_address"]
+        total_amount     = (
+            cart_mandate.get("amount")
+            or cart_mandate.get("total_budget_amount")
+            or 0
+        )
 
         domain = {
             "name":              "CartBlanche",
@@ -91,11 +96,6 @@ class X402SettlementTool:
             "chainId":           chain_id,
             "verifyingContract": "0x0000000000000000000000000000000000000000",
         }
-        # The top-level merchant_address in the mandate is the primary recipient
-        # used for the EIP-712 digest — the first vendor's pubkey from the DB.
-        primary_merchant = merchants[0]["merchant_address"]
-        total_amount     = cart_mandate.get("amount") or cart_mandate.get("total_budget_amount") or 0
-
         eip712_message = {
             "merchant_address": primary_merchant,
             "amount":           total_amount,
@@ -126,7 +126,7 @@ class X402SettlementTool:
             raise ConnectionError(f"Cannot connect to SKALE RPC: {SKALE_RPC_URL}")
 
         recovered_address = Account.recover_message(signable_bytes, signature=signature)
-        logger.info("[X402] EIP-712 signature verified. Signer: %s", recovered_address)
+        logger.info("[X402] EIP-712 verified. Signer: %s", recovered_address)
 
         # ── 4. Load agent wallet ──────────────────────────────────────────────
         private_key = os.environ.get("SKALE_AGENT_PRIVATE_KEY")
@@ -144,19 +144,16 @@ class X402SettlementTool:
         total_usd: Decimal    = Decimal("0")
 
         for vendor in merchants:
-            # Payment destination = Vendor.pubkey from Prisma — no fallback
             vendor_address = w3.to_checksum_address(vendor["merchant_address"])
 
-            # Normalise amount: handle both USD float and USDC 6-decimal int
             raw_val = vendor.get("amount", 0)
             if isinstance(raw_val, str):
                 raw_val = raw_val.replace("$", "").replace(",", "")
             raw_amount = float(raw_val)
+            # Convert USDC 6-decimal units to USD if needed
             if raw_amount > 10_000:
-                # LLM produced USDC 6-decimal units (e.g. 39690000) → convert to USD
                 raw_amount = raw_amount / 1_000_000.0
 
-            # sFUEL value = USD / 1,000,000 (preserves your original scaling rule)
             sfuel_value = max(raw_amount / 1_000_000.0, 0.0001)
 
             tx = {
@@ -184,7 +181,7 @@ class X402SettlementTool:
 
             receipts.append({
                 "commodity":        vendor.get("name", "Unknown"),
-                "merchant_address": vendor_address,   # the real Vendor.pubkey
+                "merchant_address": vendor_address,
                 "amount_usd":       float(item_usd),
                 "amount_sfuel":     sfuel_value,
                 "tx_hash":          tx_hash,
@@ -197,7 +194,6 @@ class X402SettlementTool:
             len(receipts), total_usd,
         )
 
-        # ── 6. Write Order + OrderItems to Prisma ─────────────────────────────
         await self._record_order(
             receipts=receipts,
             total_usd=total_usd,
@@ -209,7 +205,7 @@ class X402SettlementTool:
             "status":   "settled",
             "receipts": receipts,
             "network":  SKALE_RPC_URL,
-            "details":  f"Batch-settled {len(receipts)} vendor(s) at their DB pubkeys. Order recorded.",
+            "details":  f"Batch-settled {len(receipts)} vendor(s). Order recorded.",
         }
 
     # ── DB write ──────────────────────────────────────────────────────────────
@@ -221,14 +217,7 @@ class X402SettlementTool:
         user_wallet: str,
         primary_tx:  str | None,
     ) -> None:
-        """
-        Write a confirmed Order + one OrderItem per settled vendor to Prisma.
-
-        Product resolution priority:
-          1. product_id carried from shopping_node (direct Prisma cuid lookup)
-          2. name-contains fallback search
-          3. Skip OrderItem if unresolvable (Order row always written)
-        """
+        """Write a confirmed Order + one OrderItem per vendor to Prisma."""
         db = await get_db()
 
         try:
@@ -283,10 +272,10 @@ class X402SettlementTool:
                     }
                 )
                 logger.info(
-                    "[DB] OrderItem created: '%s' → product %s (vendor %s).",
+                    "[DB] OrderItem: '%s' → product %s (vendor %s).",
                     receipt["commodity"], product.id, product.vendorId,
                 )
 
         except Exception as exc:
-            # A DB write failure must never abort the settlement response
+            # DB write failure must never abort the settlement response
             logger.exception("[DB] Order recording failed: %s", exc)

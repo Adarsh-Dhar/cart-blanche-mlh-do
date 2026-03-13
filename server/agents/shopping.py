@@ -3,14 +3,14 @@ agents/shopping.py — Shopping / Discovery Agent
 ================================================
 Purpose:
   - Splits `project_plan` into individual search terms.
-  - Calls UCPCommerceSearchTool for each term against the Prisma DB.
+  - Calls UCPCommerceSearchTool for each term (queries Prisma DB).
   - De-duplicates results by product ID.
-  - Applies optional budget filter (state["budget_usd"]) — drops products
-    whose price exceeds the ceiling UNLESS no affordable alternative exists,
-    in which case it warns but still shows the cheapest option.
+  - Applies optional budget filter (state["budget_usd"]):
+      * Drops products above the ceiling if any affordable alternatives exist.
+      * If nothing is within budget, keeps the cheapest and warns the user.
   - Returns a formatted product table and sets `product_list` in state.
-  - Sets `_shopped = True` so the router moves to merchant and never
-    re-runs this node in the same turn.
+  - Sets `_shopped = True` so the post-node router moves to merchant and
+    never re-runs this node in the same turn.
 
 Output state keys set:
   product_list, _shopped, steps
@@ -35,7 +35,8 @@ def _build_table(products: list[dict]) -> str:
     lines.append(f"|{'-'*5}|{'-'*40}|{'-'*24}|{'-'*10}|")
     for i, p in enumerate(products, 1):
         lines.append(
-            f"| {i:<3} | {p['name'][:38]:<38} | {p['vendor'][:22]:<22} | ${p['price']:>7.2f} |"
+            f"| {i:<3} | {p['name'][:38]:<38} | "
+            f"{p['vendor'][:22]:<22} | ${p['price']:>7.2f} |"
         )
     return "\n".join(lines)
 
@@ -44,12 +45,12 @@ async def shopping_node(state: AgentState) -> dict:
     steps  = state.get("steps", 0)
     budget = state.get("budget_usd") or 0.0
 
-    # ── Hard stop ────────────────────────────────────────────────────────────
+    # ── Hard stop ─────────────────────────────────────────────────────────────
     if steps >= MAX_STEPS:
         return {
             "product_list": [],
-            "_shopped": True,
-            "steps": steps + 1,
+            "_shopped":     True,
+            "steps":        steps + 1,
             "messages": [AIMessage(
                 content="Search limit reached. Please start a new request.",
                 name="ShoppingAgent",
@@ -60,8 +61,8 @@ async def shopping_node(state: AgentState) -> dict:
     if not plan:
         return {
             "product_list": [],
-            "_shopped": True,
-            "steps": steps + 1,
+            "_shopped":     True,
+            "steps":        steps + 1,
             "messages": [AIMessage(
                 content="⚠️ No search plan found. Please describe what you need.",
                 name="ShoppingAgent",
@@ -71,13 +72,15 @@ async def shopping_node(state: AgentState) -> dict:
     items = [i.strip() for i in plan.split(",") if i.strip()]
     logger.info("[Shopping] Searching %d term(s): %s", len(items), items)
 
-    # ── Query UCP / Prisma for each item ──────────────────────────────────────
+    # ── Query Prisma for each term ────────────────────────────────────────────
     all_products: list[dict] = []
-    seen_ids: set[str] = set()
+    seen_ids: set[str]       = set()
 
     for item in items:
         try:
-            results = await _ucp_tool.run_async(args={"query": item}, tool_context=None)
+            results = await _ucp_tool.run_async(
+                args={"query": item}, tool_context=None
+            )
             for p in results:
                 if p["id"] not in seen_ids:
                     seen_ids.add(p["id"])
@@ -88,8 +91,8 @@ async def shopping_node(state: AgentState) -> dict:
     if not all_products:
         return {
             "product_list": [],
-            "_shopped": True,
-            "steps": steps + 1,
+            "_shopped":     True,
+            "steps":        steps + 1,
             "messages": [AIMessage(
                 content=(
                     "⚠️ No in-stock products found for your request.\n\n"
@@ -100,22 +103,20 @@ async def shopping_node(state: AgentState) -> dict:
             )],
         }
 
-    # ── Budget filtering ──────────────────────────────────────────────────────
+    # ── Budget filter ─────────────────────────────────────────────────────────
     budget_warning = ""
     if budget > 0:
         within_budget = [p for p in all_products if p["price"] <= budget]
         if within_budget:
             all_products = within_budget
         else:
-            # No product fits the budget — keep cheapest and warn
             cheapest = min(all_products, key=lambda p: p["price"])
-            all_products = [cheapest]
+            all_products   = [cheapest]
             budget_warning = (
                 f"\n\n⚠️ **Budget note:** Nothing found under **${budget:.0f}**. "
                 f"Showing the cheapest available option (${cheapest['price']:.2f})."
             )
 
-    # ── Format table ──────────────────────────────────────────────────────────
     table = _build_table(all_products)
     total = sum(p["price"] for p in all_products)
 
@@ -127,7 +128,9 @@ async def shopping_node(state: AgentState) -> dict:
         "or describe what you'd like to change."
     )
 
-    logger.info("[Shopping] %d product(s) selected (budget=$%.2f).", len(all_products), budget)
+    logger.info(
+        "[Shopping] %d product(s) selected (budget=$%.2f).", len(all_products), budget
+    )
     return {
         "product_list": all_products,
         "_shopped":     True,

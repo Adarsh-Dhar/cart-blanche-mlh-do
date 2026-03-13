@@ -2,14 +2,14 @@
 agents/settlement.py — Settlement Agent
 ========================================
 Purpose:
-  - Detects a MetaMask EIP-712 signature (0x… 65-byte hex) in the user's
+  - Detects a MetaMask EIP-712 signature (0x… 132 hex chars) in the user's
     latest message.
   - Calls X402SettlementTool which:
       1. Verifies the signature against the CartMandate on SKALE.
       2. Executes a per-vendor batch payment transaction on SKALE.
-      3. Writes an Order + OrderItems row to the Prisma DB for audit.
-  - Emits the transaction receipts as a JSON code block so the frontend's
-    TransactionReceipt component can render them as a rich UI card.
+      3. Writes an Order + OrderItems row to Prisma for audit.
+  - Emits the TX receipts as a JSON code block so the frontend's
+    TransactionReceipt component can render them as a rich card.
 
 Output state keys set:
   receipts, steps
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 _settlement_tool = X402SettlementTool()
 
-# Regex: 0x followed by at least 130 hex chars (EIP-712 sig is exactly 132)
+# EIP-712 signature: 0x followed by exactly 130 hex chars (65 bytes)
 _SIG_RE = re.compile(r"(0x[a-fA-F0-9]{130,})")
 
 
@@ -46,20 +46,23 @@ async def settlement_node(state: AgentState) -> dict:
     mandate   = state.get("cart_mandate")
     user_text = _last_human(state)
 
-    # ── Pre-flight checks ────────────────────────────────────────────────────
+    # ── Pre-flight: need an active mandate ───────────────────────────────────
     if not mandate:
         logger.warning("[Settlement] No cart_mandate in state.")
         return {
             "steps": steps + 1,
             "messages": [AIMessage(
-                content="⚠️ No active cart mandate found. Please start a new shopping request.",
+                content=(
+                    "⚠️ No active cart mandate found. "
+                    "Please start a new shopping request."
+                ),
                 name="PaymentProcessor",
             )],
         }
 
+    # ── Pre-flight: need the signature ───────────────────────────────────────
     sig_match = _SIG_RE.search(user_text)
     if not sig_match:
-        # Signature not yet received — remind the user
         return {
             "steps": steps + 1,
             "messages": [AIMessage(
@@ -110,9 +113,9 @@ async def settlement_node(state: AgentState) -> dict:
         vendor_count, total_usd,
     )
 
-    # Emit receipt JSON — the frontend TransactionReceipt component parses this
     reply = (
-        f"✅ **Payment Complete!** {vendor_count} transaction(s) confirmed on SKALE.\n\n"
+        f"✅ **Payment Complete!** {vendor_count} transaction(s) "
+        f"confirmed on SKALE.\n\n"
         f"**Total charged: ${total_usd:.2f} USD**\n\n"
         f"```json\n{json.dumps(result, indent=2)}\n```"
     )
