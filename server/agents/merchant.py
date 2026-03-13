@@ -1,21 +1,15 @@
 """
-agents/merchant.py — Merchant Checkout Agent (v2)
-==================================================
-Fixes from v1:
-  • Reads from state["product_list"] (was incorrectly reading "selected_products")
-  • Actually GENERATES the cart_mandate dict (v1 never set this key!)
-  • Groups items by vendor and produces a per-vendor merchant list for x402
-  • Emits the mandate as a ```json block so the frontend MetaMask hook picks it up
+agents/merchant.py — Merchant Checkout Agent (Silent Version)
+============================================================
+Removed all conversational text wrappers to allow the React 
+ProductListCard component to handle the UI exclusively.
 """
 
 from __future__ import annotations
-
 import json
 import logging
-
 from langchain_core.messages import AIMessage
-
-from ..state import AgentState
+from server.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -23,28 +17,22 @@ logger = logging.getLogger(__name__)
 _FALLBACK_ADDRESS = "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9"
 _CHAIN_ID = 324705682   # SKALE testnet
 
-
 async def merchant_node(state: AgentState) -> dict:
     print("\n--- MERCHANT CHECKOUT ---")
 
     products = state.get("product_list") or []
-    budget   = state.get("budget_usd", 0.0) or 0.0
-
     if not products:
         return {
+            "_merchant_reviewed": True,
             "messages": [AIMessage(
-                content=(
-                    "⚠️ No products in cart. "
-                    "Please start a new shopping request to find items first."
-                ),
+                content="⚠️ No products in cart to checkout.",
                 name="MerchantAgent",
             )],
         }
 
-    # ── Group products by vendor ───────────────────────────────────────────
+    # 1. Group products by vendor for the X402 mandate
     vendor_groups: dict[str, dict] = {}
     for p in products:
-        # Prefer vendor_id (Prisma cuid) as the grouping key
         vid = p.get("vendor_id") or p.get("vendor", "unknown")
         if vid not in vendor_groups:
             vendor_groups[vid] = {
@@ -55,20 +43,16 @@ async def merchant_node(state: AgentState) -> dict:
                 "total":            0.0,
             }
         vendor_groups[vid]["products"].append(p)
-        vendor_groups[vid]["total"] = round(
-            vendor_groups[vid]["total"] + p["price"], 2
-        )
+        vendor_groups[vid]["total"] = round(vendor_groups[vid]["total"] + p["price"], 2)
 
     total_usd = round(sum(p["price"] for p in products), 2)
-
-    # Primary merchant = vendor with highest spend (used for EIP-712 signing)
     primary = max(vendor_groups.values(), key=lambda v: v["total"])
     primary_address = primary["merchant_address"] or _FALLBACK_ADDRESS
 
-    # ── Build EIP-712 compatible CartMandate ──────────────────────────────
+    # 2. Build the EIP-712 compatible CartMandate
     cart_mandate = {
         "merchant_address":   primary_address,
-        "amount":             total_usd,          # USD float; settlement tool handles conversion
+        "amount":             total_usd,
         "total_budget_amount": total_usd,
         "currency":           "USDC",
         "chain_id":           _CHAIN_ID,
@@ -92,39 +76,29 @@ async def merchant_node(state: AgentState) -> dict:
         ],
     }
 
-    # ── Format the cart review message ────────────────────────────────────
-    lines = ["Here is your confirmed cart:\n"]
-    for p in products:
+    # 3. Create ONLY the raw Markdown Table (No intro or outro text)
+    # This is what your frontend 'MarkdownProductCards' component parses.
+    lines = [f"| {'#':<3} | {'Product':<38} | {'Vendor':<22} | {'Price':>8} |"]
+    lines.append(f"|{'-'*5}|{'-'*40}|{'-'*24}|{'-'*10}|")
+    for i, p in enumerate(products, 1):
+        v_name = p.get('vendor', 'Unknown Vendor')
         lines.append(
-            f"- **{p['name']}** — ${p['price']:.2f} "
-            f"_(via {p.get('vendor', 'Unknown')})_"
+            f"| {i:<3} | {p['name'][:38]:<38} | "
+            f"{v_name[:22]:<22} | ${p['price']:>7.2f} |"
         )
+    
+    table = "\n".join(lines)
 
-    lines.append(f"\n**Total: ${total_usd:.2f} USD**")
+    logger.info("[Merchant] Mandate ready - total: $%.2f", total_usd)
 
-    if budget > 0 and total_usd > budget:
-        lines.append(
-            f"\n⚠️ Note: total exceeds your stated budget of **${budget:.0f}**."
-        )
-
-    vendor_count = len(vendor_groups)
-    lines.append(
-        f"\nThis will split across **{vendor_count} vendor(s)**. "
-        "Please sign the EIP-712 CartMandate below to authorise payment:"
-    )
-
-    review       = "\n".join(lines)
-    mandate_json = json.dumps(cart_mandate, indent=2)
-
-    logger.info(
-        "[Merchant] Mandate ready — $%.2f USD across %d vendor(s).",
-        total_usd, vendor_count,
-    )
-
+    # 4. Return state without extra messages. 
+    # The AIMessage now contains ONLY the table, which your UI will transform 
+    # into the 'Your Cart' layout.
     return {
         "cart_mandate": cart_mandate,
+        "_merchant_reviewed": True,
         "messages": [AIMessage(
-            content=f"{review}\n\n```json\n{mandate_json}\n```",
+            content=table,
             name="MerchantAgent",
         )],
     }

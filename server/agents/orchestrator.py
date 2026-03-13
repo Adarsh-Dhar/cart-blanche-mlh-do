@@ -132,8 +132,4 @@ async def orchestrator_node(state: AgentState) -> dict:
         "_shopped":         False,
         "product_list":     None,
         "cart_mandate":     None,
-        "messages": [AIMessage(
-            content=f"🔎 Searching for: **{plan}**{budget_note}{pref_notes}",
-            name="Orchestrator",
-        )],
     }
