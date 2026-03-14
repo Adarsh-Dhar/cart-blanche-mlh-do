@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { ShoppingBag, Store, Package, CheckCircle2, ChevronRight, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { ShoppingBag, Store, Package, CheckCircle2, ChevronRight, Sparkles, ExternalLink } from "lucide-react";
 
 export interface ProductItem {
   id: string;
@@ -137,9 +138,10 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
       {/* ── Product grid ── */}
       <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {products.map((product, i) => (
-          <div
+          <Link
             key={product.id}
-            className="group rounded-xl overflow-hidden border border-border bg-background hover:border-primary/30 transition-all duration-200 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5"
+            href={`/products/${product.id}`}
+            className="group rounded-xl overflow-hidden border border-border bg-background hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 block"
             style={{ animationDelay: `${i * 60}ms` }}
           >
             {/* Image */}
@@ -155,6 +157,12 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
               <span className="absolute bottom-2 right-2 text-xs font-black text-white drop-shadow-sm">
                 ${product.price.toFixed(2)}
               </span>
+              {/* Hover: "View" pill */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <span className="flex items-center gap-1 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full">
+                  View <ExternalLink className="w-2.5 h-2.5" />
+                </span>
+              </div>
             </div>
 
             {/* Info */}
@@ -173,7 +181,7 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
                 )}
               </div>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
 

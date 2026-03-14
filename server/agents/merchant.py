@@ -1,8 +1,8 @@
 """
-agents/merchant.py — Merchant Checkout Agent (Silent Version)
-============================================================
-Removed all conversational text wrappers to allow the React 
-ProductListCard component to handle the UI exclusively.
+agents/merchant.py — Merchant Checkout Agent
+==============================================
+Emits the cart mandate as a typed JSON block so the frontend's
+CartMandateCard component can render it as an interactive signing card.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from server.state import AgentState
 
 logger = logging.getLogger(__name__)
 
-# Fallback payment address used only when a vendor has no pubkey
 _FALLBACK_ADDRESS = "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9"
 _CHAIN_ID = 324705682   # SKALE testnet
 
@@ -51,11 +50,11 @@ async def merchant_node(state: AgentState) -> dict:
 
     # 2. Build the EIP-712 compatible CartMandate
     cart_mandate = {
-        "merchant_address":   primary_address,
-        "amount":             total_usd,
+        "merchant_address":    primary_address,
+        "amount":              total_usd,
         "total_budget_amount": total_usd,
-        "currency":           "USDC",
-        "chain_id":           _CHAIN_ID,
+        "currency":            "USDC",
+        "chain_id":            _CHAIN_ID,
         "merchants": [
             {
                 "name":             vg["name"],
@@ -76,25 +75,19 @@ async def merchant_node(state: AgentState) -> dict:
         ],
     }
 
-    # 3. Create ONLY the raw Markdown Table (No intro or outro text)
-    # This is what your frontend 'MarkdownProductCards' component parses.
-    lines = [f"| {'#':<3} | {'Product':<38} | {'Vendor':<22} | {'Price':>8} |"]
-    lines.append(f"|{'-'*5}|{'-'*40}|{'-'*24}|{'-'*10}|")
-    for i, p in enumerate(products, 1):
-        v_name = p.get('vendor', 'Unknown Vendor')
-        lines.append(
-            f"| {i:<3} | {p['name'][:38]:<38} | "
-            f"{v_name[:22]:<22} | ${p['price']:>7.2f} |"
-        )
-    
-    table = "\n".join(lines)
+    # 3. Emit the mandate as a typed JSON block — the frontend CartMandateCard
+    #    component detects `"type": "cart_mandate"` and renders a signing UI.
+    mandate_payload = {"type": "cart_mandate", **cart_mandate}
 
-    logger.info("[Merchant] Mandate ready - total: $%.2f", total_usd)
+    reply = (
+        f"```json\n{json.dumps(mandate_payload, indent=2)}\n```"
+    )
 
-    # 4. Return state without extra messages. 
-    # The AIMessage now contains ONLY the table, which your UI will transform 
-    # into the 'Your Cart' layout.
+    logger.info("[Merchant] Mandate ready — total: $%.2f, %d vendor(s)",
+                total_usd, len(vendor_groups))
+
     return {
-        "cart_mandate": cart_mandate,
+        "cart_mandate":      cart_mandate,
         "_merchant_reviewed": True,
+        "messages": [AIMessage(content=reply, name="MerchantAgent")],
     }

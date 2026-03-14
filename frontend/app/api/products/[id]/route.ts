@@ -8,21 +8,25 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: {
-        vendor: true,
-        category: {
-          include: { parent: true },
+    let product = null;
+    try {
+      product = await prisma.product.findUnique({
+        where: { id },
+        include: {
+          vendor: true,
+          category: {
+            include: { parent: true },
+          },
         },
-      },
-    });
-
+      });
+    } catch (relationError) {
+      console.error("[Relation error in product fetch]", relationError);
+      // Try fallback: fetch without relations
+      product = await prisma.product.findUnique({ where: { id } });
+    }
     if (!product) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
-
     return NextResponse.json({ data: product });
   } catch (error) {
     console.error("[GET /api/products/[id]]", error);

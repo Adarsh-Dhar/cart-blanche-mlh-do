@@ -1,15 +1,14 @@
 """
-agents/shopping.py — Shopping Agent (v2)
+agents/shopping.py — Shopping Agent (v3)
 =========================================
-Key improvements over v1:
-  - Searches per TERM (not per category group), so "Stationery: notebook, pen,
-    pencil, highlighter" yields up to 4 separate products.
-  - Normalises plural search terms (notebooks→notebook, pens→pen) so they
-    actually match DB product names like "Notebook (3-Pack)" and "Gel Pen Set".
-  - Respects per-category preferences ("premium" / "budget") stored in
-    AgentState.item_preferences.
-  - Returns a structured ```json product_list block so the frontend can render
-    interactive product cards with deep-links to /products/[id].
+Key improvements over v2:
+  - Budget upgrade loop now jumps DIRECTLY to the most expensive option
+    that still fits within remaining budget headroom, rather than stepping
+    up one tier at a time.  With an $800 budget and $97 in cart, the agent
+    will immediately try the most premium SKU in each category instead of
+    creeping up slowly.
+  - All other behaviour (per-term search, singular normalisation,
+    per-category tier preferences) is unchanged from v2.
 """
 
 from __future__ import annotations
@@ -31,29 +30,22 @@ _ucp_tool = UCPCommerceSearchTool()
 def _search_variants(term: str) -> list[str]:
     """
     Return an ordered list of search variants for *term*, singular first.
-
-    Examples:
-      "notebooks"    → ["notebook", "notebooks"]
-      "highlighters" → ["highlighter", "highlighters"]
-      "pens"         → ["pen", "pens"]
-      "backpack"     → ["backpack"]   (no change — already singular)
     """
     term = term.strip().lower()
     variants: list[str] = []
 
-    # Strip common English plural suffixes to expose the stem
     plural_rules = [
-        ("ighters", "ighter"),   # highlighters → highlighter
+        ("ighters", "ighter"),
         ("ifiers", "ifier"),
         ("ifiers", "ify"),
         ("iers",   "ier"),
-        ("ches",   "ch"),        # watches → watch
-        ("shes",   "sh"),        # dishes  → dish
-        ("xes",    "x"),         # boxes   → box
-        ("ses",    "s"),         # glasses → glass
-        ("ies",    "y"),         # batteries → battery
-        ("ves",    "f"),         # knives → knife
-        ("s",      ""),          # notebooks → notebook, pens → pen
+        ("ches",   "ch"),
+        ("shes",   "sh"),
+        ("xes",    "x"),
+        ("ses",    "s"),
+        ("ies",    "y"),
+        ("ves",    "f"),
+        ("s",      ""),
     ]
 
     singular: str | None = None
@@ -63,7 +55,7 @@ def _search_variants(term: str) -> list[str]:
             break
 
     if singular and singular != term:
-        variants = [singular, term]   # singular first for better DB hits
+        variants = [singular, term]
     else:
         variants = [term]
 
@@ -93,7 +85,7 @@ async def _search_term(term: str) -> list[dict]:
             logger.warning("[Shopping] Search failed for '%s': %s", variant, exc)
 
         if all_results:
-            break  # stop as soon as any variant yields results
+            break
 
     return sorted(all_results, key=lambda x: x["price"])
 
@@ -137,7 +129,6 @@ async def shopping_node(state: AgentState) -> dict:
     categories = [c.strip() for c in plan.split(";") if c.strip()]
 
     # ── 1. Collect options for every individual search term ────────────────
-    # term_slots = list of {category, term, options: [...]}
     term_slots: list[dict] = []
 
     for cat_str in categories:
@@ -177,9 +168,8 @@ async def shopping_node(state: AgentState) -> dict:
 
     # ── 2. Initial selection: one unique product per term ─────────────────
     # Priority: respect per-category preference; default = cheapest.
-    # Globally tracked selected_ids prevents the same product appearing twice.
 
-    selected: list[dict]   = []   # [{slot, product}]
+    selected: list[dict]   = []
     selected_ids: set[str] = set()
 
     for slot in term_slots:
@@ -205,11 +195,13 @@ async def shopping_node(state: AgentState) -> dict:
 
     current_total: float = sum(s["product"]["price"] for s in selected)
 
-    # ── 3. Budget upgrade loop: swap to higher tiers if headroom allows ───
+    # ── 3. Budget upgrade loop: jump directly to the most expensive option
+    #        that still fits in the remaining budget.  This is O(n²) worst
+    #        case but n (# of cart items) is always small (< 20).
     if budget > 0 and current_total < budget:
-        made_upgrade = True
-        while made_upgrade:
-            made_upgrade = False
+        improved = True
+        while improved:
+            improved = False
             for item in selected:
                 cat_name = item["slot"]["category"]
                 pref     = item_preferences.get(cat_name, "auto").lower()
@@ -218,25 +210,35 @@ async def shopping_node(state: AgentState) -> dict:
 
                 options  = item["slot"]["options"]
                 current  = item["product"]
-                cur_idx  = next(
-                    (i for i, p in enumerate(options) if p["id"] == current["id"]), 0
-                )
 
-                if cur_idx + 1 >= len(options):
-                    continue
+                # Find the most expensive candidate that:
+                #   a) is not the current product
+                #   b) is not already claimed by another slot
+                #   c) fits within remaining budget
+                best_candidate  = None
+                best_price_diff = 0.0
 
-                next_item  = options[cur_idx + 1]
-                # Skip if another term already claimed this product
-                if next_item["id"] in selected_ids and next_item["id"] != current["id"]:
-                    continue
+                for candidate in options:
+                    if candidate["id"] == current["id"]:
+                        continue
+                    if candidate["id"] in selected_ids:
+                        continue  # claimed by another term-slot
 
-                price_diff = next_item["price"] - current["price"]
-                if current_total + price_diff <= budget:
+                    price_diff = candidate["price"] - current["price"]
+                    if price_diff <= 0:
+                        continue  # not an upgrade
+
+                    if current_total + price_diff <= budget:
+                        if price_diff > best_price_diff:
+                            best_price_diff = price_diff
+                            best_candidate  = candidate
+
+                if best_candidate:
                     selected_ids.discard(current["id"])
-                    item["product"] = next_item
-                    selected_ids.add(next_item["id"])
-                    current_total += price_diff
-                    made_upgrade = True
+                    selected_ids.add(best_candidate["id"])
+                    current_total = round(current_total + best_price_diff, 2)
+                    item["product"] = best_candidate
+                    improved = True
 
     # ── 4. Build final product list ────────────────────────────────────────
     final_products: list[dict] = [s["product"] for s in selected]

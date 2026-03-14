@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { TransactionReceipt } from "@/components/TransactionReceipt";
+import { CartMandateCard, type CartMandateData } from "@/components/cart-mandate-card";
 import MarkdownProductCards from "./MarkdownProductCards";
 import { ProductListCard, type ProductListData } from "./ProductListCard";
 
@@ -36,7 +37,6 @@ interface GraphState {
 
 // ── Parse a product_list JSON block out of a message string ──────────────────
 function parseProductList(content: string): ProductListData | null {
-  // Try fenced ```json block first
   const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
   const raw = fenced?.[1] ?? content;
   try {
@@ -45,7 +45,6 @@ function parseProductList(content: string): ProductListData | null {
       return parsed as ProductListData;
     }
   } catch {}
-  // Also try bare JSON blob anywhere in the string
   const bareMatch = content.match(/(\{[\s\S]*"type"\s*:\s*"product_list"[\s\S]*\})/);
   if (bareMatch?.[1]) {
     try {
@@ -56,12 +55,36 @@ function parseProductList(content: string): ProductListData | null {
   return null;
 }
 
-// ── Strip the JSON block from display text so it doesn't render raw ──────────
+// ── Parse a cart_mandate JSON block out of a message string ──────────────────
+function parseCartMandate(content: string): CartMandateData | null {
+  const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const raw = fenced?.[1] ?? content;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (parsed?.type === "cart_mandate" && parsed.merchant_address) {
+      // Strip the type field before returning — CartMandateData doesn't include it
+      const { type: _t, ...mandate } = parsed;
+      return mandate as CartMandateData;
+    }
+  } catch {}
+  const bareMatch = content.match(/(\{[\s\S]*"type"\s*:\s*"cart_mandate"[\s\S]*\})/);
+  if (bareMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(bareMatch[1]);
+      if (parsed?.type === "cart_mandate") {
+        const { type: _t, ...mandate } = parsed;
+        return mandate as CartMandateData;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// ── Strip a JSON code block from display text ─────────────────────────────────
 function stripJsonBlock(content: string): string {
-  // Remove fenced block
   let s = content.replace(/```(?:json)?[\s\S]*?```/g, "").trim();
-  // Remove bare JSON that starts with {
   s = s.replace(/\{[\s\S]*"type"\s*:\s*"product_list"[\s\S]*\}/, "").trim();
+  s = s.replace(/\{[\s\S]*"type"\s*:\s*"cart_mandate"[\s\S]*\}/, "").trim();
   return s;
 }
 
@@ -80,7 +103,7 @@ export default function ChatPage() {
     _payment_confirmed: false,
   });
 
-  const { isConnected, address, signMessage } = useMetaMask();
+  const { isConnected, address, signMandate, connect } = useMetaMask();
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -92,41 +115,94 @@ export default function ChatPage() {
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
-  const handlePayment = async (mandate: any) => {
-    if (!isConnected || !address) {
-      toast({ title: "Wallet not connected", variant: "destructive" });
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const signature = await signMessage(JSON.stringify(mandate));
-      if (!signature) throw new Error("Signature failed");
+  // ── Shared streaming reader ──────────────────────────────────────────────
+  const streamResponse = async (res: Response, _userText: string) => {
+    const reader  = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let currentContent = "";
+    let currentAgent   = "Agent";
 
-      const response = await fetch("http://localhost:8001/settle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, signature, mandate }),
-      });
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-      const receipt = await response.json();
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: "assistant",
-        agentName: "SettlementAgent",
-        content: "Payment settled successfully. Here is your receipt:",
-        timestamp: new Date(),
-        receipt,
-        status: "complete",
-      }]);
-      setGraphState(prev => ({ ...prev, _payment_confirmed: true }));
-    } catch (err) {
-      toast({ title: "Payment failed", description: String(err), variant: "destructive" });
-    } finally {
-      setIsLoading(false);
+      for (const line of decoder.decode(value, { stream: true }).split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const dataStr = line.slice(6).trim();
+        if (!dataStr || dataStr === "[DONE]") continue;
+
+        try {
+          const data = JSON.parse(dataStr);
+
+          if (data.type === "state_update") {
+            setGraphState(prev => ({ ...prev, ...data.state }));
+            continue;
+          }
+
+          if (data.agent) currentAgent = data.agent;
+
+          if (data.content) {
+            const textChunk = data?.content?.parts?.[0]?.text;
+            if (!textChunk) continue;
+            currentContent += textChunk;
+
+            // During streaming: hide JSON blocks to avoid flash of raw text
+            const hasProductList = currentContent.includes('"type": "product_list"') || currentContent.includes('"type":"product_list"');
+            const hasMandate = currentContent.includes('"type": "cart_mandate"') || currentContent.includes('"type":"cart_mandate"');
+            const displayText = (hasProductList || hasMandate)
+              ? stripJsonBlock(currentContent)
+              : currentContent.replace(/```json[\s\S]*$/, "");
+
+            setMessages(prev => {
+              const arr = [...prev];
+              const last = arr[arr.length - 1];
+              if (last?.role === "assistant" && last.status === "streaming" && last.agentName === currentAgent) {
+                last.content = displayText || currentContent;
+                (last as any)._fullContent = currentContent;
+              } else {
+                arr.push({
+                  id: Date.now().toString(),
+                  role: "assistant",
+                  agentName: currentAgent,
+                  content: displayText || currentContent,
+                  timestamp: new Date(),
+                  status: "streaming",
+                });
+                (arr[arr.length - 1] as any)._fullContent = currentContent;
+              }
+              return arr;
+            });
+          }
+
+          if (data.type === "end") {
+            setMessages(prev => {
+              const arr = [...prev];
+              const last = arr[arr.length - 1];
+              if (last?.role === "assistant") {
+                last.content = (last as any)._fullContent ?? last.content;
+                last.status  = "complete";
+              }
+              return arr;
+            });
+            currentContent = "";
+          }
+        } catch {}
+      }
     }
+
+    // Final flush — ensure last message has full content for JSON parsing
+    setMessages(prev => {
+      const arr = [...prev];
+      const last = arr[arr.length - 1];
+      if (last?.role === "assistant") {
+        last.content = (last as any)._fullContent ?? currentContent ?? last.content;
+        last.status  = "complete";
+      }
+      return arr;
+    });
   };
 
-  // Called by ProductListCard "Looks Good" button
+  // ── "Looks Good" button → trigger merchant flow ─────────────────────────
   const handleLooksGood = async () => {
     setIsLoading(true);
     setMessages(prev => [...prev, {
@@ -155,94 +231,62 @@ export default function ChatPage() {
     }
   };
 
-  // Shared streaming reader
-  const streamResponse = async (res: Response, _userText: string) => {
-    const reader  = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let currentContent = "";
-    let currentAgent   = "Agent1";
+  // ── CartMandateCard "Sign & Pay" → MetaMask → settlement ────────────────
+  const handleMandateSign = async (mandate: CartMandateData) => {
+    // Build the EIP-712 typed data payload expected by signMandate
+    const eip712Payload = {
+      domain: {
+        name:    "CartBlanche",
+        version: "1",
+        chainId: mandate.chain_id ?? 324705682,
+      },
+      types: {
+        CartMandate: [
+          { name: "merchant_address", type: "address" },
+          { name: "amount",           type: "uint256" },
+          { name: "currency",         type: "string"  },
+        ],
+      },
+      primaryType: "CartMandate",
+      message: {
+        merchant_address: mandate.merchant_address,
+        amount:           mandate.amount,
+        currency:         mandate.currency,
+      },
+    };
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+    // signMandate auto-connects MetaMask if not already connected
+    const signature = await signMandate(eip712Payload);
 
-      for (const line of decoder.decode(value, { stream: true }).split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const dataStr = line.slice(6).trim();
-        if (!dataStr || dataStr === "[DONE]") continue;
+    const sigMessage = `Here is my signature for the CartMandate: ${signature}`;
 
-        try {
-          const data = JSON.parse(dataStr);
+    // Show the signature in chat as a user message
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: "user",
+      content: sigMessage,
+      timestamp: new Date(),
+      status: "complete",
+    }]);
 
-          if (data.type === "state_update") {
-            setGraphState(prev => ({ ...prev, ...data.state }));
-            continue;
-          }
-
-          if (data.agent) currentAgent = data.agent;
-
-          if (data.content) {
-            const textChunk = data?.content?.parts?.[0]?.text;
-            if (!textChunk) continue;
-            currentContent += textChunk;
-
-            // During streaming: hide JSON block to avoid flash of raw text
-            const displayText = currentContent.includes('"type": "product_list"') || currentContent.includes('"type":"product_list"')
-              ? stripJsonBlock(currentContent)
-              : currentContent.replace(/```json[\s\S]*$/, "");  // hide partial fence
-
-            setMessages(prev => {
-              const arr = [...prev];
-              const last = arr[arr.length - 1];
-              if (last?.role === "assistant" && last.status === "streaming" && last.agentName === currentAgent) {
-                last.content = displayText || currentContent;
-                // Store full content in a data attribute so we can parse after stream ends
-                (last as any)._fullContent = currentContent;
-              } else {
-                arr.push({
-                  id: Date.now().toString(),
-                  role: "assistant",
-                  agentName: currentAgent,
-                  content: displayText || currentContent,
-                  timestamp: new Date(),
-                  status: "streaming",
-                  ...(({ _fullContent: currentContent }) as any),
-                });
-                (arr[arr.length - 1] as any)._fullContent = currentContent;
-              }
-              return arr;
-            });
-          }
-
-          if (data.type === "end") {
-            setMessages(prev => {
-              const arr = [...prev];
-              const last = arr[arr.length - 1];
-              if (last?.role === "assistant") {
-                // Restore full content so parseProductList can find the JSON
-                last.content = (last as any)._fullContent ?? last.content;
-                last.status  = "complete";
-              }
-              return arr;
-            });
-            currentContent = "";
-          }
-        } catch {}
-      }
+    setIsLoading(true);
+    try {
+      const res = await fetch("http://localhost:8000/run_sse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, message: sigMessage }),
+      });
+      if (!res.body) throw new Error("No response body");
+      await streamResponse(res, sigMessage);
+      setGraphState(prev => ({ ...prev, _payment_confirmed: true }));
+    } catch (err: any) {
+      toast({ title: "Settlement failed", description: String(err), variant: "destructive" });
+    } finally {
+      setIsLoading(false);
     }
-
-    // Final flush — ensure last message has full content
-    setMessages(prev => {
-      const arr = [...prev];
-      const last = arr[arr.length - 1];
-      if (last?.role === "assistant") {
-        last.content = (last as any)._fullContent ?? currentContent ?? last.content;
-        last.status  = "complete";
-      }
-      return arr;
-    });
   };
 
+  // ── Main send ────────────────────────────────────────────────────────────
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -276,11 +320,11 @@ export default function ChatPage() {
 
   const getAgentIcon = (agentName?: string) => {
     switch (agentName) {
-      case "Orchestrator":   return <Search    className="w-5 h-5 text-indigo-500" />;
-      case "ShoppingAgent":  return <Bot       className="w-5 h-5 text-emerald-500" />;
-      case "Merchant":       return <Wallet    className="w-5 h-5 text-amber-500" />;
-      case "SettlementAgent":return <ShieldCheck className="w-5 h-5 text-blue-500" />;
-      default:               return <Bot       className="w-5 h-5 text-primary" />;
+      case "Orchestrator":    return <Search     className="w-5 h-5 text-indigo-500" />;
+      case "ShoppingAgent":   return <Bot        className="w-5 h-5 text-emerald-500" />;
+      case "MerchantAgent":   return <Wallet     className="w-5 h-5 text-amber-500" />;
+      case "PaymentProcessor":return <ShieldCheck className="w-5 h-5 text-blue-500" />;
+      default:                return <Bot        className="w-5 h-5 text-primary" />;
     }
   };
 
@@ -294,11 +338,11 @@ export default function ChatPage() {
           <div className="relative flex-1">
             <div className="absolute left-4 top-4 bottom-8 w-0.5 bg-border" />
             <div className="space-y-8 relative">
-              <StepItem active={graphState._orchestrated}     title="1. Intent Extraction" desc="Orchestrator analyzes request & budget" />
-              <StepItem active={graphState._shopped}          title="2. Product Search"    desc="Shopping Agent queries live inventory" />
-              <StepItem active={graphState._merchant_reviewed}title="3. Cart Optimization" desc="Merchant selects best value options" />
-              <StepItem active={graphState._mandate_generated}title="4. Mandate Generation"desc="Cryptographic vault signs payment request" />
-              <StepItem active={graphState._payment_confirmed}title="5. Settlement"        desc="X402 Protocol confirms final transaction" isLast />
+              <StepItem active={graphState._orchestrated}     title="1. Intent Extraction"  desc="Orchestrator analyzes request & budget" />
+              <StepItem active={graphState._shopped}          title="2. Product Search"      desc="Shopping Agent queries live inventory" />
+              <StepItem active={graphState._merchant_reviewed}title="3. Cart Optimisation"  desc="Merchant reviews best value options" />
+              <StepItem active={graphState._mandate_generated}title="4. Mandate Generation" desc="Cryptographic vault signs payment request" />
+              <StepItem active={graphState._payment_confirmed}title="5. Settlement"         desc="X402 Protocol confirms final transaction" isLast />
             </div>
           </div>
         </div>
@@ -315,7 +359,7 @@ export default function ChatPage() {
                   </div>
                   <h2 className="text-2xl font-bold text-foreground mb-3 tracking-tight">Cart-Blanche Nova</h2>
                   <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
-                    Describe what you need. I'll analyze intent, search live inventory, optimize your cart, and handle crypto-settlement securely.
+                    Describe what you need. I'll analyse intent, search live inventory, optimise your cart, and handle crypto-settlement securely.
                   </p>
                   <div className="mt-8 flex gap-3 justify-center flex-wrap">
                     <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me stuff i need for my first day of school under $800")}>
@@ -328,11 +372,14 @@ export default function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  // ── Determine render mode ──────────────────────────────────
-                  const productList = msg.role === "assistant" && msg.status === "complete"
+                  // ── Determine render mode ─────────────────────────────
+                  const productList  = msg.role === "assistant" && msg.status === "complete"
                     ? parseProductList(msg.content)
                     : null;
-                  const displayText = productList
+                  const cartMandate  = msg.role === "assistant" && msg.status === "complete" && !productList
+                    ? parseCartMandate(msg.content)
+                    : null;
+                  const displayText  = (productList || cartMandate)
                     ? stripJsonBlock(msg.content)
                     : msg.content;
 
@@ -344,7 +391,7 @@ export default function ChatPage() {
                         </Avatar>
                       )}
 
-                      <div className={`flex flex-col gap-1.5 max-w-[85%] ${msg.role === "user" ? "items-end" : ""} ${productList ? "w-full max-w-full" : ""}`}>
+                      <div className={`flex flex-col gap-1.5 max-w-[85%] ${msg.role === "user" ? "items-end" : ""} ${(productList || cartMandate) ? "w-full max-w-full" : ""}`}>
                         {msg.role !== "user" && (
                           <div className="flex items-center gap-2 pl-1">
                             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{msg.agentName || "System"}</span>
@@ -381,6 +428,22 @@ export default function ChatPage() {
                               </Card>
                             )}
                             <ProductListCard data={productList} onConfirm={handleLooksGood} />
+                          </div>
+
+                        /* Cart mandate card */
+                        ) : cartMandate ? (
+                          <div className="w-full space-y-3">
+                            {displayText && (
+                              <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border">
+                                <CardContent className="p-4 text-[15px] leading-relaxed">
+                                  <MarkdownProductCards>{displayText}</MarkdownProductCards>
+                                </CardContent>
+                              </Card>
+                            )}
+                            <CartMandateCard
+                              mandate={cartMandate}
+                              onSign={handleMandateSign}
+                            />
                           </div>
 
                         /* Normal assistant text */
