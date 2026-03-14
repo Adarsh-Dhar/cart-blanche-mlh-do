@@ -143,6 +143,8 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
             href={`/products/${product.id}`}
             className="group rounded-xl overflow-hidden border border-border bg-background hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 block"
             style={{ animationDelay: `${i * 60}ms` }}
+            target="_blank"
+            rel="noopener noreferrer"
           >
             {/* Image */}
             <div className="relative h-24 overflow-hidden bg-muted">

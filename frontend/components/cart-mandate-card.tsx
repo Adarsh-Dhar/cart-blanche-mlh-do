@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { ShoppingBag, Store, Shield, Loader2, CheckCircle } from 'lucide-react'
+import { ShoppingBag, Store, Shield, Loader2, CheckCircle, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
 
 export interface MandateVendor {
   name: string
@@ -40,93 +42,108 @@ export function CartMandateCard({ mandate, onSign }: CartMandateCardProps) {
   }
 
   return (
-    <div className="w-full rounded-xl border border-amber-200 dark:border-amber-800/60 overflow-hidden bg-card shadow-sm my-3">
-
+    <Card className="w-full max-w-md border-primary/20 bg-background/50 backdrop-blur-sm shadow-xl my-4 overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 flex items-center justify-between border-b border-amber-200/60 dark:border-amber-800/40 bg-amber-50/60 dark:bg-amber-950/30">
-        <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-          <span className="font-semibold text-sm text-amber-900 dark:text-amber-200">
-            Payment Authorisation Required
-          </span>
-        </div>
-        <span className="text-sm font-bold text-amber-700 dark:text-amber-300">
-          ${total.toFixed(2)} {mandate.currency}
-        </span>
-      </div>
-
-      {/* Vendor breakdown */}
-      <div className="divide-y divide-border/30">
-        {mandate.merchants.map((vendor, i) => (
-          <div key={i} className="px-4 py-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <Store className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                <span className="font-medium text-sm">{vendor.name}</span>
-              </div>
-              <span className="text-sm font-semibold text-primary">
-                ${vendor.amount.toFixed(2)}
-              </span>
+      <CardHeader className="pb-3 bg-primary/5 border-b border-primary/10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-primary/10 rounded-full">
+              <Shield className="w-4 h-4 text-primary" />
             </div>
-            {vendor.products && vendor.products.length > 0 && (
-              <ul className="ml-5 space-y-0.5">
-                {vendor.products.map((p, j) => (
-                  <li key={j} className="flex justify-between text-xs text-muted-foreground">
-                    <span className="truncate mr-2">{p.name}</span>
-                    <span className="flex-shrink-0">${p.price.toFixed(2)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div>
+              <CardTitle className="text-sm font-bold tracking-tight">Payment Authorization</CardTitle>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest">EIP-712 CartMandate</p>
+            </div>
           </div>
-        ))}
-      </div>
-
-      {/* Footer: wallet + sign button */}
-      <div className="px-4 py-3 border-t border-amber-200/60 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-3">
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Clicking <strong>Sign &amp; Pay</strong> will open your wallet (MetaMask) to
-          authorise a <strong>${total.toFixed(2)} {mandate.currency}</strong> EIP-712
-          CartMandate. No funds move until you approve in your wallet.
-        </p>
-
-        <div className="flex items-center gap-3">
-          {status === 'idle' && (
-            <Button
-              onClick={handleSign}
-              className="gap-2 bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-500 dark:hover:bg-amber-600"
-            >
-              <Shield className="w-4 h-4" />
-              Sign &amp; Pay ${total.toFixed(2)}
-            </Button>
-          )}
-          {status === 'signing' && (
-            <Button disabled className="gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Waiting for wallet…
-            </Button>
-          )}
-          {status === 'done' && (
-            <div className="flex items-center gap-2 text-green-600 text-sm font-medium">
-              <CheckCircle className="w-4 h-4" />
-              Signed — processing payment…
-            </div>
-          )}
-          {status === 'cancelled' && (
-            <>
-              <p className="text-xs text-red-500">Signature cancelled.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setStatus('idle')}
-                className="border-red-300 text-red-600 hover:bg-red-50"
-              >
-                Try Again
-              </Button>
-            </>
-          )}
+          <div className="text-right">
+            <span className="text-lg font-bold text-primary">
+              ${total.toFixed(2)}
+            </span>
+            <p className="text-[10px] text-muted-foreground">{mandate.currency}</p>
+          </div>
         </div>
-      </div>
-    </div>
+      </CardHeader>
+
+      <CardContent className="pt-4 space-y-4">
+        {/* Vendor breakdown */}
+        <div className="space-y-4">
+          {mandate.merchants.map((vendor, i) => (
+            <div key={i} className="group">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Store className="w-4 h-4 text-muted-foreground" />
+                  <span className="font-semibold text-sm">{vendor.name}</span>
+                </div>
+                <span className="text-sm font-medium text-foreground">
+                  ${vendor.amount.toFixed(2)}
+                </span>
+              </div>
+              
+              {vendor.products && vendor.products.length > 0 && (
+                <div className="pl-6 space-y-1.5 border-l-2 border-primary/10 ml-2">
+                  {vendor.products.map((p, j) => (
+                    <div key={j} className="flex justify-between text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+                      <span>{p.name}</span>
+                      <span className="font-mono">${p.price.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <Separator className="bg-primary/10" />
+
+        <div className="flex items-start gap-2 p-3 bg-muted/30 rounded-lg border border-border/50">
+          <Wallet className="w-4 h-4 text-primary mt-0.5" />
+          <p className="text-[11px] text-muted-foreground leading-normal">
+            Authorizing this mandate grants the agent permission to settle the 
+            total <strong>${total.toFixed(2)}</strong> across the merchants listed above. 
+            Confirming in MetaMask is required to proceed.
+          </p>
+        </div>
+      </CardContent>
+
+      <CardFooter className="bg-primary/5 pt-4 border-t border-primary/10 flex flex-col gap-3">
+        {status === 'idle' && (
+          <Button
+            onClick={handleSign}
+            className="w-full gap-2 shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-primary-foreground font-bold transition-all active:scale-[0.98]"
+          >
+            <Shield className="w-4 h-4" />
+            Sign & Pay ${total.toFixed(2)}
+          </Button>
+        )}
+
+        {status === 'signing' && (
+          <Button disabled className="w-full gap-2 bg-muted text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Waiting for wallet response...
+          </Button>
+        )}
+
+        {status === 'done' && (
+          <div className="flex items-center justify-center gap-2 p-2 w-full bg-green-500/10 text-green-500 rounded-md border border-green-500/20 text-sm font-bold">
+            <CheckCircle className="w-4 h-4" />
+            Authorization Successful
+          </div>
+        )}
+
+        {status === 'cancelled' && (
+          <div className="w-full space-y-2">
+            <p className="text-center text-[11px] text-destructive font-medium">Signature was denied or failed.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setStatus('idle')}
+              className="w-full border-destructive/30 text-destructive hover:bg-destructive/10"
+            >
+              Try Authorizing Again
+            </Button>
+          </div>
+        )}
+      </CardFooter>
+    </Card>
   )
 }
