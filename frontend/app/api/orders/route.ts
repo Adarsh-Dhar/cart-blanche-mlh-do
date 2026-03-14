@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma, OrderStatus } from "@prisma/client";
+import { Prisma } from "@/lib/frontend/lib/generated-prisma"; // Import Prisma namespace for Decimal type
+import { OrderStatus } from "@/lib/generated-prisma/enums";
 
 // GET /api/orders - List all orders
 export async function GET(request: NextRequest) {
@@ -66,7 +67,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate each item has productId and quantity
     for (const item of items) {
       if (!item.productId || typeof item.quantity !== "number" || item.quantity < 1) {
         return NextResponse.json(
@@ -76,9 +76,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fetch all products in one query
     const productIds: string[] = items.map((i: { productId: string }) => i.productId);
-    const products: Product[] = await prisma.product.findMany({
+    const products = await prisma.product.findMany({
       where: { id: { in: productIds } },
     });
 
@@ -91,8 +90,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check stock availability
-    const productMap = new Map(products.map((p: Product) => [p.id, p]));
+    const productMap = new Map(products.map((p) => [p.id, p]));
     for (const item of items) {
       const product = productMap.get(item.productId)!;
       if (product.stockQuantity < item.quantity) {
@@ -103,15 +101,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Calculate total
     let totalAmount = new Prisma.Decimal(0);
     for (const item of items) {
       const product = productMap.get(item.productId)!;
       totalAmount = totalAmount.add(product.price.mul(item.quantity));
     }
 
-    // Create order + items + decrement stock in a transaction
-    const order = await prisma.$transaction(async (tx: typeof prisma) => {
+    const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
           totalAmount,
@@ -139,7 +135,6 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Decrement stock for each product
       for (const item of items) {
         await tx.product.update({
           where: { id: item.productId },

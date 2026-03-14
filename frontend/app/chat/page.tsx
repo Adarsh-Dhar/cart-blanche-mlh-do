@@ -99,6 +99,9 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Track whether this session has been persisted to the DB yet
+  const chatInitialized = useRef(false);
+
   const [graphState, setGraphState] = useState<GraphState>({
     _orchestrated: false,
     _shopped: false,
@@ -119,12 +122,51 @@ export default function ChatPage() {
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
+  // ── Ensure the chat session exists in the DB ─────────────────────────────
+  const ensureChatInDB = useCallback(async (id: string) => {
+    if (chatInitialized.current) return;
+    try {
+      const res = await fetch("/api/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        chatInitialized.current = true;
+      }
+    } catch (err) {
+      console.error("Failed to initialize chat in DB:", err);
+    }
+  }, []);
+
+  // ── Persist a user+agent turn to the DB ──────────────────────────────────
+  const saveMessageTurn = useCallback(async (
+    chatId: string,
+    userText: string,
+    agentText: string,
+    agentName: string,
+  ) => {
+    try {
+      await fetch(`/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: { type: "USER", text: userText },
+          agentMessage: { type: agentName || "AGENT", text: agentText },
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to save message turn:", err);
+    }
+  }, []);
+
   // ── Reset state for a new chat ──────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
     setSessionId(generateSessionId());
     setMessages([]);
     setInput("");
     setIsLoading(false);
+    chatInitialized.current = false;
     setGraphState({
       _orchestrated: false,
       _shopped: false,
@@ -165,6 +207,7 @@ export default function ChatPage() {
 
       setMessages(rebuilt);
       setSessionId(selectedId);
+      chatInitialized.current = true; // already exists in DB
       setGraphState({
         _orchestrated: true,
         _shopped: true,
@@ -180,7 +223,11 @@ export default function ChatPage() {
   }, [sessionId, toast]);
 
   // ── Shared streaming reader ──────────────────────────────────────────────
-  const streamResponse = async (res: Response, _userText: string) => {
+  const streamResponse = async (
+    res: Response,
+    userText: string,
+    chatId: string,
+  ) => {
     const reader  = res.body!.getReader();
     const decoder = new TextDecoder();
     let currentContent = "";
@@ -253,36 +300,49 @@ export default function ChatPage() {
       }
     }
 
+    // Finalize last message
+    let finalContent = "";
+    let finalAgent = currentAgent;
     setMessages(prev => {
       const arr = [...prev];
       const last = arr[arr.length - 1];
       if (last?.role === "assistant") {
         last.content = (last as any)._fullContent ?? currentContent ?? last.content;
         last.status  = "complete";
+        finalContent = last.content;
+        finalAgent = last.agentName || currentAgent;
       }
       return arr;
     });
+
+    // ── Save this turn to the database ──────────────────────────────────────
+    if (userText && finalContent) {
+      await saveMessageTurn(chatId, userText, finalContent, finalAgent);
+    }
   };
 
   // ── "Looks Good" button → trigger merchant flow ─────────────────────────
   const handleLooksGood = async () => {
+    const userText = "Looks good";
     setIsLoading(true);
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: "user",
-      content: "Looks good",
+      content: userText,
       timestamp: new Date(),
       status: "complete",
     }]);
+
+    await ensureChatInDB(sessionId);
 
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message: "Looks good" }),
+        body: JSON.stringify({ session_id: sessionId, message: userText }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, "Looks good");
+      await streamResponse(res, userText, sessionId);
     } catch (err: any) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "system",
@@ -327,6 +387,8 @@ export default function ChatPage() {
       status: "complete",
     }]);
 
+    await ensureChatInDB(sessionId);
+
     setIsLoading(true);
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
@@ -335,7 +397,7 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: sigMessage }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, sigMessage);
+      await streamResponse(res, sigMessage, sessionId);
       setGraphState(prev => ({ ...prev, _payment_confirmed: true }));
     } catch (err: any) {
       toast({ title: "Settlement failed", description: String(err), variant: "destructive" });
@@ -357,6 +419,9 @@ export default function ChatPage() {
     setInput("");
     setIsLoading(true);
 
+    // Create the chat record in DB on first message
+    await ensureChatInDB(sessionId);
+
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
         method: "POST",
@@ -364,7 +429,7 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: userText }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, userText);
+      await streamResponse(res, userText, sessionId);
     } catch (error: any) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "system",
@@ -398,8 +463,6 @@ export default function ChatPage() {
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden min-w-0">
-
-
         {/* Right Side: Chat Area */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           <ScrollArea ref={scrollRef} className="flex-1 p-6">
@@ -540,22 +603,6 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function StepItem({ active, title, desc, isLast }: { active: boolean; title: string; desc: string; isLast?: boolean }) {
-  return (
-    <div className="relative flex gap-4 z-10">
-      <div className={`mt-0.5 flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-500 ${
-        active ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-border bg-background text-muted-foreground"
-      }`}>
-        {active ? <Check className="w-4 h-4 stroke-[3]" /> : <div className="w-2 h-2 rounded-full bg-border" />}
-      </div>
-      <div>
-        <div className={`font-semibold text-[15px] transition-colors duration-300 ${active ? "text-foreground" : "text-muted-foreground"}`}>{title}</div>
-        <div className={`text-xs mt-1 font-medium transition-colors duration-300 ${active ? "text-muted-foreground" : "text-muted-foreground/50"}`}>{desc}</div>
       </div>
     </div>
   );

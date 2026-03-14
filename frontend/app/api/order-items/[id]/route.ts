@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Decimal } from "@prisma/client";
+import { Prisma } from "@/lib/frontend/lib/generated-prisma";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -66,7 +66,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       );
     }
 
-    const quantityDiff = quantity - existing.quantity; // positive = need more stock
+    const quantityDiff = quantity - existing.quantity;
 
     if (quantityDiff > 0 && existing.product.stockQuantity < quantityDiff) {
       return NextResponse.json(
@@ -78,21 +78,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
 
     const updatedItem = await prisma.$transaction(async (tx) => {
-      // Adjust stock
       await tx.product.update({
         where: { id: existing.productId },
         data: { stockQuantity: { decrement: quantityDiff } },
       });
 
-      // Update line item price
       const newLineTotal = existing.product.price.mul(quantity);
       const oldLineTotal = existing.price.mul(existing.quantity);
       const totalDiff = newLineTotal.sub(oldLineTotal);
 
-      // Update order total
       await tx.order.update({
         where: { id: existing.orderId },
-        data: { totalAmount: { increment: totalDiff as unknown as Decimal } },
+        data: { totalAmount: { increment: totalDiff as unknown as Prisma.Decimal } },
       });
 
       return tx.orderItem.update({
@@ -144,17 +141,15 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Restore stock
       await tx.product.update({
         where: { id: existing.productId },
         data: { stockQuantity: { increment: existing.quantity } },
       });
 
-      // Subtract from order total
       const lineTotal = existing.price.mul(existing.quantity);
       await tx.order.update({
         where: { id: existing.orderId },
-        data: { totalAmount: { decrement: lineTotal as unknown as Decimal } },
+        data: { totalAmount: { decrement: lineTotal as unknown as Prisma.Decimal } },
       });
 
       await tx.orderItem.delete({ where: { id } });

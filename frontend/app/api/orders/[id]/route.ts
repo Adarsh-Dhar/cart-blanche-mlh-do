@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { $Enums } from "@/lib/generated-prisma";
+import { $Enums } from "@/lib/frontend/lib/generated-prisma"; // Import enums for OrderStatus
 
 type Params = { params: Promise<{ id: string }> };
 
