@@ -1,6 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+// Use dynamic import for ESM compatibility with custom generator output
+import { PrismaClient } from '../frontend/lib/frontend/lib/generated-prisma/client.js';
+import { PrismaPg } from '@prisma/adapter-pg'; // Required for v7 PostgreSQL
+import pg from 'pg';
+import "dotenv/config";
 
-// 1. Fix: Explicitly pass options to handle Bun environment propagation in Prisma 7
+// 1. Setup the Driver Adapter (New in v7)
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
@@ -8,11 +12,12 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const prisma = new PrismaClient({
-  datasources: {
-    url: process.env.DATABASE_URL,
-  },
-});
+// Create a connection pool and adapter
+const pool = new pg.Pool({ connectionString: databaseUrl });
+const adapter = new PrismaPg(pool as any);
+
+// 2. Instantiate Client with the adapter
+const prisma = new PrismaClient({ adapter });
 
 
 async function main() {
