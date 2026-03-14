@@ -17,9 +17,17 @@ export async function POST(request: NextRequest, { params }: Params) {
       agentMessage: { type: string; text: string; agentName?: string };
     };
 
-    if (!userMessage?.text || !agentMessage?.text) {
+    // agentMessage.text can be empty when the agent sends a pure JSON payload
+    // (e.g. product_list or cart_mandate) with no surrounding prose
+    if (!userMessage?.text) {
       return NextResponse.json(
-        { error: "Both userMessage and agentMessage (with text) are required" },
+        { error: "userMessage.text is required" },
+        { status: 400 }
+      );
+    }
+    if (agentMessage === undefined || agentMessage === null) {
+      return NextResponse.json(
+        { error: "agentMessage is required" },
         { status: 400 }
       );
     }
@@ -29,29 +37,35 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Chat not found" }, { status: 404 });
     }
 
-    // 1. Create the AgentResponse first (no FK to UserRequest yet)
-    const agentResponse = await prisma.agentResponse.create({
-      data: {
-        type:   agentMessage.type   ?? "TEXT",
-        text:   agentMessage.text,
-        chatId,
-      },
-    });
+    // Capture explicit timestamps so user is always strictly before agent
+    const userTimestamp  = new Date();
+    const agentTimestamp = new Date(userTimestamp.getTime() + 1); // +1 ms
 
-    // 2. Create the UserRequest, linking to the AgentResponse
+    // 1. Create the UserRequest first (so its timestamp is earlier)
     const userRequest = await prisma.userRequest.create({
       data: {
-        type:            userMessage.type ?? "TEXT",
-        text:            userMessage.text,
+        type:      userMessage.type ?? "TEXT",
+        text:      userMessage.text,
         chatId,
-        agentResponseId: agentResponse.id,
+        timestamp: userTimestamp,
       },
     });
 
-    // 3. Back-link the AgentResponse to the UserRequest
-    await prisma.agentResponse.update({
-      where: { id: agentResponse.id },
-      data:  { userRequestId: userRequest.id },
+    // 2. Create the AgentResponse, linking back to the UserRequest
+    const agentResponse = await prisma.agentResponse.create({
+      data: {
+        type:          agentMessage.type ?? "TEXT",
+        text:          agentMessage.text ?? "",
+        chatId,
+        timestamp:     agentTimestamp,
+        userRequestId: userRequest.id,
+      },
+    });
+
+    // 3. Back-link the UserRequest to the AgentResponse
+    await prisma.userRequest.update({
+      where: { id: userRequest.id },
+      data:  { agentResponseId: agentResponse.id },
     });
 
     return NextResponse.json({ data: { userRequest, agentResponse } }, { status: 201 });

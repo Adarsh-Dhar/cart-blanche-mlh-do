@@ -38,7 +38,6 @@ interface GraphState {
   _payment_confirmed: boolean;
 }
 
-// ── Parse a product_list JSON block out of a message string ──────────────────
 function parseProductList(content: string): ProductListData | null {
   const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
   const raw = fenced?.[1] ?? content;
@@ -58,7 +57,6 @@ function parseProductList(content: string): ProductListData | null {
   return null;
 }
 
-// ── Parse a cart_mandate JSON block out of a message string ──────────────────
 function parseCartMandate(content: string): CartMandateData | null {
   const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
   const raw = fenced?.[1] ?? content;
@@ -82,7 +80,6 @@ function parseCartMandate(content: string): CartMandateData | null {
   return null;
 }
 
-// ── Strip a JSON code block from display text ─────────────────────────────────
 function stripJsonBlock(content: string): string {
   let s = content.replace(/```(?:json)?[\s\S]*?```/g, "").trim();
   s = s.replace(/\{[\s\S]*"type"\s*:\s*"product_list"[\s\S]*\}/, "").trim();
@@ -94,7 +91,6 @@ function generateSessionId() {
   return `sess-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ── Get or create a persistent session ID from localStorage ──────────────────
 function getOrCreateSessionId(): string {
   if (typeof window === "undefined") return generateSessionId();
   const stored = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -105,7 +101,6 @@ function getOrCreateSessionId(): string {
 }
 
 export default function ChatPage() {
-  // Initialize sessionId from localStorage so it survives refresh
   const [sessionId, setSessionId] = useState<string>(() => {
     if (typeof window === "undefined") return generateSessionId();
     return getOrCreateSessionId();
@@ -116,9 +111,7 @@ export default function ChatPage() {
   const [isLoadingSession, setIsLoadingSession] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Track whether this session has been persisted to the DB yet
   const chatInitialized = useRef(false);
-  // Track whether we've named the chat yet
   const chatNamed = useRef(false);
 
   const [graphState, setGraphState] = useState<GraphState>({
@@ -152,7 +145,6 @@ export default function ChatPage() {
     fetch(`/api/chats/${storedId}`)
       .then((res) => {
         if (!res.ok) {
-          // Chat doesn't exist in DB yet — that's fine, start fresh
           setIsLoadingSession(false);
           return null;
         }
@@ -191,7 +183,7 @@ export default function ChatPage() {
       })
       .catch(() => {})
       .finally(() => setIsLoadingSession(false));
-  }, []); // Only on mount
+  }, []);
 
   // ── Ensure the chat session exists in the DB ─────────────────────────────
   const ensureChatInDB = useCallback(async (id: string, name?: string) => {
@@ -233,7 +225,6 @@ export default function ChatPage() {
   // ── Reset state for a new chat ──────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
     const newId = generateSessionId();
-    // Persist new session ID to localStorage
     localStorage.setItem(SESSION_STORAGE_KEY, newId);
     setSessionId(newId);
     setMessages([]);
@@ -281,7 +272,6 @@ export default function ChatPage() {
 
       setMessages(rebuilt);
       setSessionId(selectedId);
-      // Persist selected session to localStorage
       localStorage.setItem(SESSION_STORAGE_KEY, selectedId);
       chatInitialized.current = true;
       chatNamed.current = true;
@@ -299,16 +289,24 @@ export default function ChatPage() {
     }
   }, [sessionId, toast]);
 
-  // ── Shared streaming reader ──────────────────────────────────────────────
+  // ── Shared streaming reader ───────────────────────────────────────────────
+  // KEY DESIGN: content + agentName are plain synchronous variables updated on
+  // every chunk. We NEVER read values back out of setMessages callbacks —
+  // React batches those asynchronously and they are NOT guaranteed to have run
+  // by the time we return. currentContent is always correct at return time.
   const streamResponse = async (
     res: Response,
-    userText: string,
     chatId: string,
-  ) => {
+  ): Promise<{ content: string; agentName: string }> => {
     const reader  = res.body!.getReader();
     const decoder = new TextDecoder();
+
+    // Plain synchronous accumulators — the source of truth for DB saving
     let currentContent = "";
     let currentAgent   = "Agent";
+    // Latches the last non-empty content before any end-event reset
+    let finalContent   = "";
+    let finalAgent     = "Agent";
 
     while (true) {
       const { value, done } = await reader.read();
@@ -327,81 +325,99 @@ export default function ChatPage() {
             continue;
           }
 
-          if (data.agent) currentAgent = data.agent;
+          // Agent switch — close the previous streaming bubble in the UI
+          if (data.agent && data.agent !== currentAgent) {
+            setMessages(prev => {
+              const arr = [...prev];
+              const last = arr[arr.length - 1];
+              if (last?.role === "assistant" && last.status === "streaming") {
+                last.status = "complete";
+              }
+              return arr;
+            });
+            currentContent = "";
+            currentAgent   = data.agent;
+          } else if (data.agent) {
+            currentAgent = data.agent;
+          }
 
           if (data.content) {
             const textChunk = data?.content?.parts?.[0]?.text;
             if (!textChunk) continue;
+
+            // Accumulate synchronously — this is what we return for DB saving
             currentContent += textChunk;
 
             const hasProductList = currentContent.includes('"type": "product_list"') || currentContent.includes('"type":"product_list"');
-            const hasMandate = currentContent.includes('"type": "cart_mandate"') || currentContent.includes('"type":"cart_mandate"');
-            const displayText = (hasProductList || hasMandate)
+            const hasMandate     = currentContent.includes('"type": "cart_mandate"') || currentContent.includes('"type":"cart_mandate"');
+            const displayText    = (hasProductList || hasMandate)
               ? stripJsonBlock(currentContent)
               : currentContent.replace(/```json[\s\S]*$/, "");
 
+            // UI update only — do NOT try to read values back out of this callback
             setMessages(prev => {
-              const arr = [...prev];
+              const arr  = [...prev];
               const last = arr[arr.length - 1];
               if (last?.role === "assistant" && last.status === "streaming" && last.agentName === currentAgent) {
                 last.content = displayText || currentContent;
-                (last as any)._fullContent = currentContent;
               } else {
                 arr.push({
-                  id: Date.now().toString(),
-                  role: "assistant",
+                  id:        Date.now().toString(),
+                  role:      "assistant",
                   agentName: currentAgent,
-                  content: displayText || currentContent,
+                  content:   displayText || currentContent,
                   timestamp: new Date(),
-                  status: "streaming",
+                  status:    "streaming",
                 });
-                (arr[arr.length - 1] as any)._fullContent = currentContent;
               }
               return arr;
             });
           }
 
           if (data.type === "end") {
+            // Latch before resetting — this is what we'll return for DB saving
+            if (currentContent) {
+              finalContent = currentContent;
+              finalAgent   = currentAgent;
+            }
             setMessages(prev => {
-              const arr = [...prev];
+              const arr  = [...prev];
               const last = arr[arr.length - 1];
-              if (last?.role === "assistant") {
-                last.content = (last as any)._fullContent ?? last.content;
-                last.status  = "complete";
+              if (last?.role === "assistant" && last.status === "streaming") {
+                last.status = "complete";
               }
               return arr;
             });
+            // Reset for any follow-up agent message in the same stream
             currentContent = "";
           }
         } catch {}
       }
     }
 
-    // Finalize last message
-    let finalContent = "";
-    let finalAgent = currentAgent;
+    // Safety-net: mark any still-streaming bubble complete
     setMessages(prev => {
-      const arr = [...prev];
+      const arr  = [...prev];
       const last = arr[arr.length - 1];
-      if (last?.role === "assistant") {
-        last.content = (last as any)._fullContent ?? currentContent ?? last.content;
-        last.status  = "complete";
-        finalContent = last.content;
-        finalAgent = last.agentName || currentAgent;
+      if (last?.role === "assistant" && last.status === "streaming") {
+        last.status = "complete";
       }
       return arr;
     });
 
-    // ── Save this turn to the database ──────────────────────────────────────
-    if (userText && finalContent) {
-      await saveMessageTurn(chatId, userText, finalContent, finalAgent);
-    }
+    // finalContent latched the last non-empty content before any end-event reset
+    // Fall back to currentContent in case the stream ended without an "end" event
+    return {
+      content:   finalContent || currentContent,
+      agentName: finalAgent   || currentAgent,
+    };
   };
-
   // ── "Looks Good" button → trigger merchant flow ─────────────────────────
   const handleLooksGood = async () => {
     const userText = "Looks good";
     setIsLoading(true);
+
+    // 1. Push user message to UI immediately
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: "user",
@@ -419,7 +435,14 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: userText }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, userText, sessionId);
+
+      // 2. Stream + get back final agent content
+      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
+
+      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
+      if (agentContent) {
+        await saveMessageTurn(sessionId, userText, stripJsonBlock(agentContent) || agentContent, agentName);
+      }
     } catch (err: any) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "system",
@@ -456,6 +479,7 @@ export default function ChatPage() {
     const signature = await signMandate(eip712Payload);
     const sigMessage = `Here is my signature for the CartMandate: ${signature}`;
 
+    // 1. Push user signature message to UI immediately
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: "user",
@@ -465,8 +489,8 @@ export default function ChatPage() {
     }]);
 
     await ensureChatInDB(sessionId);
-
     setIsLoading(true);
+
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
         method: "POST",
@@ -474,7 +498,15 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: sigMessage }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, sigMessage, sessionId);
+
+      // 2. Stream + get back final agent content
+      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
+
+      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
+      if (agentContent) {
+        await saveMessageTurn(sessionId, sigMessage, stripJsonBlock(agentContent) || agentContent, agentName);
+      }
+
       setGraphState(prev => ({ ...prev, _payment_confirmed: true }));
     } catch (err: any) {
       toast({ title: "Settlement failed", description: String(err), variant: "destructive" });
@@ -489,6 +521,8 @@ export default function ChatPage() {
     if (!input.trim() || isLoading) return;
 
     const userText = input.trim();
+
+    // 1. Push user message to UI immediately
     setMessages(prev => [...prev, {
       id: Date.now().toString(), role: "user",
       content: userText, timestamp: new Date(), status: "complete",
@@ -496,7 +530,7 @@ export default function ChatPage() {
     setInput("");
     setIsLoading(true);
 
-    // Create the chat record in DB on first message, using message as the chat name
+    // Name the chat on the very first message
     const chatName = !chatNamed.current
       ? userText.slice(0, 60) + (userText.length > 60 ? "…" : "")
       : undefined;
@@ -514,7 +548,14 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: userText }),
       });
       if (!res.body) throw new Error("No response body");
-      await streamResponse(res, userText, sessionId);
+
+      // 2. Stream + get back final agent content
+      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
+
+      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
+      if (agentContent) {
+        await saveMessageTurn(sessionId, userText, stripJsonBlock(agentContent) || agentContent, agentName);
+      }
     } catch (error: any) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(), role: "system",
