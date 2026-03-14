@@ -109,3 +109,43 @@ enum OrderStatus {
   DELIVERED
   CANCELLED
 }
+
+model Chat {
+  id            String          @id @default(cuid())
+  startTime     DateTime        @default(now())
+  lastUpdated   DateTime        @updatedAt
+  
+  // Relations
+  userRequests  UserRequest[]
+  agentResponses AgentResponse[]
+}
+
+model UserRequest {
+  id              String         @id @default(cuid())
+  type            String         // e.g., "DISCOVERY", "AFFIRMATION"
+  text            String
+  timestamp       DateTime       @default(now())
+  
+  // Chat Relation
+  chatId          String
+  chat            Chat           @relation(fields: [chatId], references: [id])
+  
+  // AgentResponse Relation (1:1 link to the response generated for this request)
+  agentResponseId String?        @unique
+  agentResponse   AgentResponse? @relation("RequestToResponse", fields: [agentResponseId], references: [id])
+}
+
+model AgentResponse {
+  id             String       @id @default(cuid())
+  type           String       // e.g., "PRODUCT_LIST", "MANDATE", "RECEIPT"
+  text           String       // Could store raw text or the JSON payload string
+  timestamp      DateTime     @default(now())
+  
+  // Chat Relation
+  chatId         String
+  chat           Chat         @relation(fields: [chatId], references: [id])
+  
+  // UserRequest Relation (Back-reference for the 1:1 link)
+  userRequestId  String?      @unique
+  userRequest    UserRequest? @relation("RequestToResponse")
+}
