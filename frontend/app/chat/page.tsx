@@ -359,15 +359,11 @@ export default function ChatPage() {
                   </div>
                   <h2 className="text-2xl font-bold text-foreground mb-3 tracking-tight">Cart-Blanche Nova</h2>
                   <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
-                    Describe what you need. I'll analyse intent, search live inventory, optimise your cart, and handle crypto-settlement securely.
+                    Describe what you need. I&apos;ll analyse intent, search live inventory, optimise your cart, and handle crypto-settlement securely.
                   </p>
                   <div className="mt-8 flex gap-3 justify-center flex-wrap">
-                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me stuff i need for my first day of school under $800")}>
-                      "Back to school $800"
-                    </Badge>
-                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me camping gear")}>
-                      "Buy me camping gear"
-                    </Badge>
+                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me stuff i need for my first day of school under $800")}>{"Back to school $800"}</Badge>
+                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me camping gear")}>{"Buy me camping gear"}</Badge>
                   </div>
                 </div>
               ) : (

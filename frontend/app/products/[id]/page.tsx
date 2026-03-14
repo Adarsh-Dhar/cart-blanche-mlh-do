@@ -193,7 +193,7 @@ export default function ProductDetailPage() {
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-center px-4">
         <AlertCircle className="w-12 h-12 text-red-400" />
         <h2 className="text-2xl font-bold">Product Not Found</h2>
-        <p className="text-muted-foreground">This product doesn't exist or has been removed.</p>
+        <p className="text-muted-foreground">This product doesn&apos;t exist or has been removed.</p>
         <Link href="/shop" className="text-primary hover:underline text-sm font-medium">
           ← Back to Shop
         </Link>

@@ -1,43 +1,31 @@
 """
 main.py — Cart-Blanche API Server
 ===================================
-Start with:
-    uvicorn server.main:app --reload --port 8000
-
-Required env vars (server/.env):
-    GITHUB_TOKEN            = "github_pat_..."
-    GITHUB_MODEL_NAME       = "gpt-4o-mini"   # optional, this is the default
-    SKALE_AGENT_PRIVATE_KEY = "<hex key>"
-    DATABASE_URL            = "postgresql://..."
-    RPC_URL                 = "https://sepolia.base.org"
+Saves every user turn as a UserRequest and every agent reply as an
+AgentResponse in Prisma, keyed by session_id → Chat.
 """
 
 from __future__ import annotations
 
-# ── IMPORTANT: load .env BEFORE any local imports ─────────────────────────────
-# Every local module (llm.py, db.py, tools) reads os.environ at import time.
-# load_dotenv() must run first or they will see empty strings.
 import os
 from dotenv import load_dotenv
 
 _here = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(_here, ".env"))            # server/.env  (primary)
-load_dotenv(os.path.join(_here, "..", ".env"))      # project root (fallback)
+load_dotenv(os.path.join(_here, ".env"))
+load_dotenv(os.path.join(_here, "..", ".env"))
 
-# ── Stdlib ─────────────────────────────────────────────────────────────────────
 import asyncio
 import json
 import logging
 from typing import Any
 
-# ── Third-party ────────────────────────────────────────────────────────────────
 from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
 
-# ── Local (safe to import now that env vars are loaded) ────────────────────────
 from .graph import build_graph
+from .db    import get_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,7 +33,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Cart-Blanche API", version="2.0.0")
 
 app.add_middleware(
@@ -56,13 +43,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Compile the LangGraph once at startup.
-# MemorySaver keeps per-thread conversation history in RAM (no extra DB needed).
 _graph = build_graph()
 logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready.")
 
+# ── session_id → Prisma Chat.id  (in-memory; survives server lifetime) ────────
+_session_chat: dict[str, str] = {}
 
-# ── Graceful DB shutdown ───────────────────────────────────────────────────────
+
+async def _ensure_chat(session_id: str) -> str:
+    """Return (or lazily create) the Prisma Chat record for this session."""
+    if session_id in _session_chat:
+        return _session_chat[session_id]
+
+    db = await get_db()
+    chat = await db.chat.create(data={})
+    _session_chat[session_id] = chat.id
+    logger.info("[DB] Chat %s created for session %s", chat.id, session_id)
+    return chat.id
+
+
+async def _save_user_request(chat_id: str, text: str, request_type: str) -> str:
+    """Persist a UserRequest and return its id."""
+    db = await get_db()
+    req = await db.userrequest.create(data={
+        "type":   request_type,
+        "text":   text,
+        "chatId": chat_id,
+    })
+    return req.id
+
+
 import atexit
 
 def _shutdown() -> None:
@@ -73,49 +83,22 @@ def _shutdown() -> None:
             loop.create_task(prisma.disconnect())
         elif not loop.is_closed():
             loop.run_until_complete(prisma.disconnect())
-        logger.info("[Cart-Blanche] Prisma disconnected.")
     except Exception as exc:
         logger.warning("[Cart-Blanche] Shutdown warning: %s", exc)
 
 atexit.register(_shutdown)
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
-
 @app.post("/apps/shopping_concierge/users/{user_id}/sessions/{session_id}")
-async def session_init(
-    user_id: str,
-    session_id: str,
-    payload: Any = Body(None),
-):
-    """
-    Session pre-flight called by the frontend before the first message.
-    LangGraph MemorySaver handles per-thread history automatically, so this
-    is a no-op — it just needs to return 200.
-    """
+async def session_init(user_id: str, session_id: str, payload: Any = Body(None)):
     return {"status": "ok", "session_id": session_id}
 
 
 @app.post("/run_sse")
 async def run_sse(payload: Any = Body(None)):
-    """
-    Main streaming endpoint.
-
-    Accepts ADK-style payload:
-        {
-          "session_id":  "abc-123",
-          "new_message": { "role": "user", "parts": [{ "text": "..." }] }
-        }
-
-    Streams Server-Sent Events shaped as:
-        data: {"content": {"parts": [{"text": "..."}], "role": "model"}}
-        ...
-        data: [DONE]
-    """
     if payload is None:
         payload = {}
 
-    # Extract user text — support both ADK parts format and plain "message" key
     user_text: str = ""
     new_message = payload.get("new_message") or {}
     parts = new_message.get("parts") or []
@@ -133,14 +116,34 @@ async def run_sse(payload: Any = Body(None)):
             yield "data: [DONE]\n\n"
             return
 
+        # ── Classify request type & persist UserRequest ────────────────────
+        lower = user_text.lower().strip()
+        if any(k in lower for k in ("looks good", "confirm", "proceed", "yes", "ok")):
+            request_type = "AFFIRMATION"
+        elif any(lower.startswith(sig) for sig in ("0x", "here is my signature")):
+            request_type = "SIGNATURE"
+        else:
+            request_type = "DISCOVERY"
+
+        try:
+            chat_id         = await _ensure_chat(session_id)
+            user_request_id = await _save_user_request(chat_id, user_text, request_type)
+        except Exception as exc:
+            logger.warning("[DB] Could not persist UserRequest: %s", exc)
+            chat_id         = None
+            user_request_id = None
+
         try:
             config = {"configurable": {"thread_id": session_id}}
 
-            async for event in _graph.astream(
-                {"messages": [("user", user_text)]},
-                config=config,
-                stream_mode="values",
-            ):
+            # Inject DB ids into graph state so agent nodes can persist responses
+            init_state: dict = {
+                "messages":       [("user", user_text)],
+                "chat_id":        chat_id,
+                "user_request_id": user_request_id,
+            }
+
+            async for event in _graph.astream(init_state, config=config, stream_mode="values"):
                 messages = event.get("messages", [])
                 if not messages:
                     continue
@@ -167,7 +170,6 @@ async def run_sse(payload: Any = Body(None)):
 
 @app.get("/health")
 async def health():
-    """Simple liveness check."""
     return {
         "status": "ok",
         "agents": ["orchestrator", "shopping", "merchant", "vault", "settlement"],
@@ -176,9 +178,6 @@ async def health():
     }
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
 def _sse(parts_dict: dict) -> str:
-    """Wrap a dict as a valid Server-Sent Event data line."""
     event = {"content": {"parts": [parts_dict], "role": "model"}}
     return f"data: {json.dumps(event)}\n\n"

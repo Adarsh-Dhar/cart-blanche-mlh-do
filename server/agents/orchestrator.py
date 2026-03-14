@@ -1,20 +1,19 @@
 """
-agents/orchestrator.py — Lead Orchestrator (v2)
+agents/orchestrator.py — Lead Orchestrator (v3)
 ================================================
-Now extracts three things from the user's message:
-  1. PRODUCTS  — semicolon-separated "Category: term, term" search plan
-  2. BUDGET    — total USD ceiling (0 = no limit)
-  3. PREFERENCES — per-category tier hints ("premium" / "budget" / "auto")
-     e.g. "I want a nice backpack but save on stationery"
-          → PREFERENCES: Bags=premium; Stationery=budget
+Saves an AgentResponse to Prisma after generating the shopping plan.
+Detects AFFIRMATION messages and lets the graph router handle them
+(orchestrator skips LLM call for affirmations).
 """
 
 from __future__ import annotations
 import logging
+import json
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from server.llm   import llm
 from server.state import AgentState
+from server.db    import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +32,7 @@ Rules for PRODUCTS:
 • Use clear category names: Bags, Stationery, Electronics, Clothing, Lunchware, etc.
 • One search term per need — "Stationery: notebook, pen, pencil, highlighter" means
   the user wants FOUR separate stationery products.
-• Use simple, generic, singular or short terms: "notebook" not "spiral-bound notebooks",
-  "pen" not "ballpoint pen", "backpack" not "hiking backpack brand X".
+• Use simple, generic, singular or short terms: "notebook" not "spiral-bound notebooks".
 • Group items into the category they belong to.
 
 Rules for PREFERENCES:
@@ -63,11 +61,37 @@ BUDGET: 300
 PREFERENCES: Electronics=premium; Clothing=premium
 """
 
+_AFFIRMATION_KEYWORDS = {"looks good", "confirm", "proceed", "yes", "ok", "approve"}
+
+
+async def _save_agent_response(state: AgentState, response_type: str, text: str) -> str | None:
+    chat_id         = state.get("chat_id")
+    user_request_id = state.get("user_request_id")
+    if not chat_id:
+        return None
+    try:
+        db = await get_db()
+        resp = await db.agentresponse.create(data={
+            "type":          response_type,
+            "text":          text,
+            "chatId":        chat_id,
+            **({"userRequestId": user_request_id} if user_request_id else {}),
+        })
+        # Update the UserRequest to link back to this response (1:1)
+        if user_request_id:
+            await db.userrequest.update(
+                where={"id": user_request_id},
+                data={"agentResponseId": resp.id},
+            )
+        return resp.id
+    except Exception as exc:
+        logger.warning("[DB] Orchestrator AgentResponse save failed: %s", exc)
+        return None
+
 
 async def orchestrator_node(state: AgentState) -> dict:
     print("\n--- ORCHESTRATOR ---")
 
-    # Extract user query from messages
     query = state.get("query")
     if not query:
         for msg in reversed(state.get("messages", [])):
@@ -84,7 +108,15 @@ async def orchestrator_node(state: AgentState) -> dict:
             "_orchestrated": True,
         }
 
-    # Call the LLM
+    # ── Detect affirmation — let graph router handle, don't invoke LLM ────────
+    if query.lower().strip() in _AFFIRMATION_KEYWORDS or \
+       any(k in query.lower() for k in _AFFIRMATION_KEYWORDS):
+        return {
+            "_orchestrated": True,
+            "_shopped":      False,
+        }
+
+    # ── Full LLM extraction ────────────────────────────────────────────────────
     response = await llm.ainvoke([
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=query),
@@ -117,17 +149,19 @@ async def orchestrator_node(state: AgentState) -> dict:
     print(f"Budget:      ${budget}")
     print(f"Preferences: {preferences}")
 
-    budget_note = f" within a **${budget:.0f}** budget" if budget > 0 else ""
-    pref_notes  = ""
-    if preferences:
-        parts = [f"{cat} → {tier}" for cat, tier in preferences.items()]
-        pref_notes = f"  _(preferences: {', '.join(parts)})_"
+    # Persist the plan as an AgentResponse
+    plan_payload = json.dumps({
+        "type":        "PLAN",
+        "plan":        plan,
+        "budget":      budget,
+        "preferences": preferences,
+    })
+    await _save_agent_response(state, "PLAN", plan_payload)
 
     return {
-        # "query":            query,
         "project_plan":     plan,
-        # "budget_usd":       budget,
-        # "item_preferences": preferences,
+        "budget_usd":       budget,
+        "item_preferences": preferences,
         "_orchestrated":    True,
         "_shopped":         False,
         "product_list":     None,
