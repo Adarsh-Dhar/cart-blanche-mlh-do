@@ -10,11 +10,16 @@
 	},
 	"devDependencies": {
 		"@eslint/eslintrc": "^3.3.5",
+		"@types/node": "^25.5.0",
 		"eslint": "^10.0.3",
-		"eslint-config-next": "^16.1.6"
+		"eslint-config-next": "^16.1.6",
+		"ts-node": "^10.9.2"
 	},
 	"scripts": {
 		"postinstall": "prisma generate"
 	},
-	"packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8"
+	"packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8",
+	"prisma": {
+		"seed": "ts-node prisma/seed.ts"
+	}
 }

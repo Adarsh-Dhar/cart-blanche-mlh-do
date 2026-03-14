@@ -1,10 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
-  engineType = "binary"
+  provider = "prisma-client"
+  output   = "./generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql" // Recommended for production e-commerce
+  provider = "postgresql" 
 }
 
 model Vendor {

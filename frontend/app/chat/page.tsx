@@ -1,7 +1,7 @@
 // frontend/app/chat/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Send, Check, Bot, Wallet, Search, ShieldCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { TransactionReceipt } from "@/components/TransactionReceipt";
 import { CartMandateCard, type CartMandateData } from "@/components/cart-mandate-card";
 import MarkdownProductCards from "./MarkdownProductCards";
 import { ProductListCard, type ProductListData } from "./ProductListCard";
+import { ChatSidebar } from "@/components/chat-sidebar";
 
 import { useMetaMask } from "@/hooks/use-metamask";
 import { useToast } from "@/hooks/use-toast";
@@ -62,7 +63,6 @@ function parseCartMandate(content: string): CartMandateData | null {
   try {
     const parsed = JSON.parse(raw.trim());
     if (parsed?.type === "cart_mandate" && parsed.merchant_address) {
-      // Strip the type field before returning — CartMandateData doesn't include it
       const { type: _t, ...mandate } = parsed;
       return mandate as CartMandateData;
     }
@@ -88,11 +88,15 @@ function stripJsonBlock(content: string): string {
   return s;
 }
 
+function generateSessionId() {
+  return `sess-${Math.random().toString(36).substr(2, 9)}`;
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId] = useState(() => `sess-${Math.random().toString(36).substr(2, 9)}`);
+  const [sessionId, setSessionId] = useState(() => generateSessionId());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [graphState, setGraphState] = useState<GraphState>({
@@ -114,6 +118,66 @@ export default function ChatPage() {
   };
 
   useEffect(() => { scrollToBottom(); }, [messages]);
+
+  // ── Reset state for a new chat ──────────────────────────────────────────────
+  const handleNewChat = useCallback(() => {
+    setSessionId(generateSessionId());
+    setMessages([]);
+    setInput("");
+    setIsLoading(false);
+    setGraphState({
+      _orchestrated: false,
+      _shopped: false,
+      _merchant_reviewed: false,
+      _mandate_generated: false,
+      _payment_confirmed: false,
+    });
+  }, []);
+
+  // ── Load an existing chat session from the DB ───────────────────────────────
+  const handleSelectChat = useCallback(async (selectedId: string) => {
+    if (selectedId === sessionId) return;
+
+    setIsLoading(true);
+    setMessages([]);
+
+    try {
+      const res = await fetch(`/api/chats/${selectedId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      const timeline: {
+        role: 'user' | 'agent';
+        id: string;
+        type: string;
+        text: string;
+        timestamp: string;
+      }[] = data.data?.timeline || [];
+
+      const rebuilt: Message[] = timeline.map((item) => ({
+        id: item.id,
+        role: item.role === 'user' ? 'user' : 'assistant',
+        content: item.text,
+        timestamp: new Date(item.timestamp),
+        agentName: item.role === 'agent' ? item.type : undefined,
+        status: 'complete',
+      }));
+
+      setMessages(rebuilt);
+      setSessionId(selectedId);
+      setGraphState({
+        _orchestrated: true,
+        _shopped: true,
+        _merchant_reviewed: true,
+        _mandate_generated: false,
+        _payment_confirmed: false,
+      });
+    } catch {
+      toast({ title: "Failed to load chat", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId, toast]);
 
   // ── Shared streaming reader ──────────────────────────────────────────────
   const streamResponse = async (res: Response, _userText: string) => {
@@ -146,7 +210,6 @@ export default function ChatPage() {
             if (!textChunk) continue;
             currentContent += textChunk;
 
-            // During streaming: hide JSON blocks to avoid flash of raw text
             const hasProductList = currentContent.includes('"type": "product_list"') || currentContent.includes('"type":"product_list"');
             const hasMandate = currentContent.includes('"type": "cart_mandate"') || currentContent.includes('"type":"cart_mandate"');
             const displayText = (hasProductList || hasMandate)
@@ -190,7 +253,6 @@ export default function ChatPage() {
       }
     }
 
-    // Final flush — ensure last message has full content for JSON parsing
     setMessages(prev => {
       const arr = [...prev];
       const last = arr[arr.length - 1];
@@ -233,7 +295,6 @@ export default function ChatPage() {
 
   // ── CartMandateCard "Sign & Pay" → MetaMask → settlement ────────────────
   const handleMandateSign = async (mandate: CartMandateData) => {
-    // Build the EIP-712 typed data payload expected by signMandate
     const eip712Payload = {
       domain: {
         name:    "CartBlanche",
@@ -255,12 +316,9 @@ export default function ChatPage() {
       },
     };
 
-    // signMandate auto-connects MetaMask if not already connected
     const signature = await signMandate(eip712Payload);
-
     const sigMessage = `Here is my signature for the CartMandate: ${signature}`;
 
-    // Show the signature in chat as a user message
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: "user",
@@ -329,23 +387,18 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] bg-background w-full">
-      <main className="flex-1 flex overflow-hidden">
+    <div className="flex h-[calc(100vh-64px)] bg-background w-full overflow-hidden">
 
-        {/* Left Side: Status Pipeline */}
-        <div className="w-80 bg-muted/20 border-r border-border p-6 hidden md:flex flex-col z-10">
-          <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-8">Execution Pipeline</h2>
-          <div className="relative flex-1">
-            <div className="absolute left-4 top-4 bottom-8 w-0.5 bg-border" />
-            <div className="space-y-8 relative">
-              <StepItem active={graphState._orchestrated}     title="1. Intent Extraction"  desc="Orchestrator analyzes request & budget" />
-              <StepItem active={graphState._shopped}          title="2. Product Search"      desc="Shopping Agent queries live inventory" />
-              <StepItem active={graphState._merchant_reviewed}title="3. Cart Optimisation"  desc="Merchant reviews best value options" />
-              <StepItem active={graphState._mandate_generated}title="4. Mandate Generation" desc="Cryptographic vault signs payment request" />
-              <StepItem active={graphState._payment_confirmed}title="5. Settlement"         desc="X402 Protocol confirms final transaction" isLast />
-            </div>
-          </div>
-        </div>
+      {/* ── Chat History Sidebar ─────────────────────────────────────────── */}
+      <ChatSidebar
+        currentSessionId={sessionId}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSelectChat}
+      />
+
+      {/* ── Main area ────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden min-w-0">
+
 
         {/* Right Side: Chat Area */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
@@ -368,16 +421,12 @@ export default function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  // ── Determine render mode ─────────────────────────────
                   const productList  = msg.role === "assistant" && msg.status === "complete"
-                    ? parseProductList(msg.content)
-                    : null;
+                    ? parseProductList(msg.content) : null;
                   const cartMandate  = msg.role === "assistant" && msg.status === "complete" && !productList
-                    ? parseCartMandate(msg.content)
-                    : null;
+                    ? parseCartMandate(msg.content) : null;
                   const displayText  = (productList || cartMandate)
-                    ? stripJsonBlock(msg.content)
-                    : msg.content;
+                    ? stripJsonBlock(msg.content) : msg.content;
 
                   return (
                     <div key={msg.id} className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}>
@@ -397,23 +446,18 @@ export default function ChatPage() {
                           </div>
                         )}
 
-                        {/* User bubble */}
                         {msg.role === "user" ? (
                           <Card className="border-none shadow-sm bg-primary text-primary-foreground rounded-2xl rounded-tr-sm">
                             <CardContent className="p-4 text-[15px] leading-relaxed">
                               {msg.content}
                             </CardContent>
                           </Card>
-
-                        /* Transaction receipt */
                         ) : msg.receipt ? (
                           <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border w-full">
                             <CardContent className="p-4">
                               <TransactionReceipt receipt={msg.receipt} />
                             </CardContent>
                           </Card>
-
-                        /* Product list card */
                         ) : productList ? (
                           <div className="w-full space-y-3">
                             {displayText && (
@@ -425,8 +469,6 @@ export default function ChatPage() {
                             )}
                             <ProductListCard data={productList} onConfirm={handleLooksGood} />
                           </div>
-
-                        /* Cart mandate card */
                         ) : cartMandate ? (
                           <div className="w-full space-y-3">
                             {displayText && (
@@ -436,13 +478,8 @@ export default function ChatPage() {
                                 </CardContent>
                               </Card>
                             )}
-                            <CartMandateCard
-                              mandate={cartMandate}
-                              onSign={handleMandateSign}
-                            />
+                            <CartMandateCard mandate={cartMandate} onSign={handleMandateSign} />
                           </div>
-
-                        /* Normal assistant text */
                         ) : (
                           <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border">
                             <CardContent className="p-4 text-[15px] leading-relaxed">
@@ -503,7 +540,7 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }

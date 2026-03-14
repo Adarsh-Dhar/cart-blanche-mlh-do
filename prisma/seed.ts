@@ -1,5 +1,19 @@
-import { PrismaClient, OrderStatus } from '@prisma/client'
-const prisma = new PrismaClient()
+import { PrismaClient } from '@prisma/client';
+
+// 1. Fix: Explicitly pass options to handle Bun environment propagation in Prisma 7
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  console.error("❌ Error: DATABASE_URL is not defined in your environment.");
+  process.exit(1);
+}
+
+const prisma = new PrismaClient({
+  datasources: {
+    url: process.env.DATABASE_URL,
+  },
+});
+
 
 async function main() {
   // 1. Create Vendors (Competitors in the UCP Ecosystem)
@@ -63,7 +77,7 @@ async function main() {
     basePrice: number
   ) => {
     const catId = categoryMap[categoryName];
-    
+
     return [
       // Budget Tier
       {
@@ -123,7 +137,6 @@ async function main() {
     { name: 'Insulated Lunch Box', cat: 'Lunchware', sku: 'LNB', price: 20 },
     { name: 'Stainless Steel Water Bottle', cat: 'Lunchware', sku: 'WTR', price: 15 },
     { name: 'Bento Box Set', cat: 'Lunchware', sku: 'BTO', price: 28 },
-    // Repeat/Vary more items to hit 100+
     { name: 'Duffel Bag', cat: 'Backpacks', sku: 'DUF', price: 50 },
     { name: 'Planner/Journal', cat: 'Stationery', sku: 'PLN', price: 22 },
     { name: 'Desk Lamp', cat: 'Electronics', sku: 'LMP', price: 30 },
@@ -150,7 +163,7 @@ async function main() {
       template.sku,
       template.price
     );
-    
+
     for (const item of tieredItems) {
       await prisma.product.upsert({
         where: { productID: item.productID },
