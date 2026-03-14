@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client"
-  output   = "../frontend/lib/generated-prisma"
+  output   = "../frontend/lib/generated/prisma"
 }
 
 datasource db {
@@ -112,6 +112,7 @@ enum OrderStatus {
 
 model Chat {
   id            String          @id @default(cuid())
+  name          String          @default("")
   startTime     DateTime        @default(now())
   lastUpdated   DateTime        @updatedAt
   

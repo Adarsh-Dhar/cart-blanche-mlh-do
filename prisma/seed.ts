@@ -1,5 +1,5 @@
 // Use dynamic import for ESM compatibility with custom generator output
-import { PrismaClient } from '../frontend/lib/frontend/lib/generated-prisma/client.js';
+import { PrismaClient } from '../frontend/lib/generated/prisma/client'; // Adjust path if your generated client is located elsewhere"
 import { PrismaPg } from '@prisma/adapter-pg'; // Required for v7 PostgreSQL
 import pg from 'pg';
 import "dotenv/config";

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type Params = { params: { id: string } };
+// NOTE: params must be awaited in Next.js 15+ app router
+type Params = { params: Promise<{ id: string }> };
 
 // GET /api/chats/[id] - get a single chat session with all requests + responses
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const chat = await prisma.chat.findUnique({
       where: { id },
       include: {
@@ -25,7 +26,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
     // Build an interleaved timeline sorted by timestamp for easy rendering
     const timeline = [
-      ...chat.userRequests.map((r) => ({
+      ...chat.userRequests.map((r: { id: any; type: any; text: any; timestamp: string | number | Date; agentResponseId: any; }) => ({
         role:      "user" as const,
         id:        r.id,
         type:      r.type,
@@ -33,7 +34,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
         timestamp: new Date(r.timestamp),
         linkedResponseId: r.agentResponseId ?? null,
       })),
-      ...chat.agentResponses.map((r) => ({
+      ...chat.agentResponses.map((r: { id: any; type: any; text: any; timestamp: string | number | Date; userRequestId: any; }) => ({
         role:      "agent" as const,
         id:        r.id,
         type:      r.type,
@@ -46,6 +47,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({
       data: {
         id:             chat.id,
+        name:           chat.name,
         startTime:      chat.startTime,
         lastUpdated:    chat.lastUpdated,
         userRequests:   chat.userRequests,
@@ -62,7 +64,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 // DELETE /api/chats/[id] - delete a chat and all its messages
 export async function DELETE(_request: NextRequest, { params }: Params) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const existing = await prisma.chat.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ error: "Chat not found" }, { status: 404 });

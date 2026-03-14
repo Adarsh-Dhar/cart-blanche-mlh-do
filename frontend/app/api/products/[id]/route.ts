@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/lib/frontend/lib/generated-prisma"; // Import Prisma namespace for Decimal type
+import { Prisma } from "@/lib/generated/prisma/client" // Import Prisma namespace for Decimal type;
 
 
 type Params = { params: Promise<{ id: string }> };

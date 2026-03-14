@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/lib/frontend/lib/generated-prisma"; // Import Prisma namespace for Decimal type
-import { OrderStatus } from "@/lib/generated-prisma/enums";
+import { OrderStatus, Prisma } from "@/lib/generated/prisma/client";
 
 // GET /api/orders - List all orders
 export async function GET(request: NextRequest) {

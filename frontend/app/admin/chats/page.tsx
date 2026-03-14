@@ -115,7 +115,9 @@ export default function ChatsAdminPage() {
                       <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 6px', borderRadius: '4px', marginRight: '6px', background: (TYPE_COLORS[firstMsg.type] || '#64748b') + '20', color: TYPE_COLORS[firstMsg.type] || '#64748b' }}>
                         {firstMsg.type}
                       </span>
-                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>{preview(firstMsg.text)}</span>
+                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                        {typeof preview(firstMsg.text) === 'string' ? preview(firstMsg.text) : JSON.stringify(preview(firstMsg.text))}
+                      </span>
                     </div>
                   ) : (
                     <span style={{ color: '#4a5568', fontSize: '12px' }}>—</span>

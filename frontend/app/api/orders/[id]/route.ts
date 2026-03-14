@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { $Enums } from "@/lib/frontend/lib/generated-prisma"; // Import enums for OrderStatus
+import { $Enums } from "@/lib/generated/prisma/client"; // Import enums for OrderStatus
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -72,8 +72,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
         );
       }
 
-      const allowedTransitions = STATUS_TRANSITIONS[existing.status];
-      if (!allowedTransitions.includes(status)) {
+      const allowedTransitions = STATUS_TRANSITIONS[existing.status as $Enums.OrderStatus];
+      if (!allowedTransitions || !allowedTransitions.includes(status)) {
         return NextResponse.json(
           {
             error: `Cannot transition from ${existing.status} to ${status}. Allowed transitions: ${
@@ -142,7 +142,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
 
     // Restore stock and delete order + order items in a transaction
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: { product: { update: (arg0: { where: { id: any; }; data: { stockQuantity: { increment: any; }; }; }) => any; }; orderItem: { deleteMany: (arg0: { where: { orderId: string; }; }) => any; }; order: { delete: (arg0: { where: { id: string; }; }) => any; }; }) => {
       // Restore stock for PENDING orders
       if (existing.status === $Enums.OrderStatus.PENDING) {
         for (const item of existing.items) {

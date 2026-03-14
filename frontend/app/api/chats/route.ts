@@ -37,24 +37,32 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/chats - create or idempotently fetch a chat session
-// Body: { id? } — if id is provided, upsert that specific chat
+// Body: { id?, name? }
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { id } = body as { id?: string };
+    const { id, name } = body as { id?: string; name?: string };
 
     if (id) {
       // Idempotent: find existing or create with the given id
       const existing = await prisma.chat.findUnique({ where: { id } });
       if (existing) {
+        // Update name if provided and not yet set
+        if (name && !existing.name) {
+          const updated = await prisma.chat.update({
+            where: { id },
+            data: { name },
+          });
+          return NextResponse.json({ data: updated }, { status: 200 });
+        }
         return NextResponse.json({ data: existing }, { status: 200 });
       }
-      const chat = await prisma.chat.create({ data: { id } });
+      const chat = await prisma.chat.create({ data: { id, ...(name && { name }) } });
       return NextResponse.json({ data: chat }, { status: 201 });
     }
 
     // No id supplied — create a fresh chat with an auto-generated cuid
-    const chat = await prisma.chat.create({ data: {} });
+    const chat = await prisma.chat.create({ data: { ...(name && { name }) } });
     return NextResponse.json({ data: chat }, { status: 201 });
   } catch (error) {
     console.error("[POST /api/chats]", error);

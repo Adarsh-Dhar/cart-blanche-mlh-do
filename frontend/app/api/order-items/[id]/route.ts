@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/lib/frontend/lib/generated-prisma";
+import { Prisma } from "@/lib/generated/prisma/client"
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -77,7 +77,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       );
     }
 
-    const updatedItem = await prisma.$transaction(async (tx) => {
+    const updatedItem = await prisma.$transaction(async (tx: { product: { update: (arg0: { where: { id: any; }; data: { stockQuantity: { decrement: number; }; }; }) => any; }; order: { update: (arg0: { where: { id: any; }; data: { totalAmount: { increment: Prisma.Decimal; }; }; }) => any; }; orderItem: { update: (arg0: { where: { id: string; }; data: { quantity: number; }; include: { product: { select: { id: boolean; name: boolean; }; }; order: { select: { id: boolean; status: boolean; totalAmount: boolean; }; }; }; }) => any; }; }) => {
       await tx.product.update({
         where: { id: existing.productId },
         data: { stockQuantity: { decrement: quantityDiff } },
@@ -140,7 +140,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       );
     }
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: { product: { update: (arg0: { where: { id: any; }; data: { stockQuantity: { increment: any; }; }; }) => any; }; order: { update: (arg0: { where: { id: any; }; data: { totalAmount: { decrement: Prisma.Decimal; }; }; }) => any; }; orderItem: { delete: (arg0: { where: { id: string; }; }) => any; }; }) => {
       await tx.product.update({
         where: { id: existing.productId },
         data: { stockQuantity: { increment: existing.quantity } },

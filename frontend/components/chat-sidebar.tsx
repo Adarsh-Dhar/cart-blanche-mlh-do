@@ -5,6 +5,7 @@ import { Plus, Trash2, MessageSquare, ChevronLeft, ChevronRight, Loader2, Clock 
 
 interface ChatPreview {
   id: string
+  name: string
   startTime: string
   lastUpdated: string
   _count: { userRequests: number; agentResponses: number }
@@ -71,6 +72,7 @@ export function ChatSidebar({ currentSessionId, onNewChat, onSelectChat }: ChatS
     const p = reset ? 1 : page
     try {
       const res = await fetch(`/api/chats?page=${p}&limit=30`)
+      console.log("Fetched chats page", p, res)
       const data = await res.json()
       const incoming: ChatPreview[] = data.data || []
       setChats(prev => reset ? incoming : [...prev, ...incoming])
@@ -247,9 +249,7 @@ export function ChatSidebar({ currentSessionId, onNewChat, onSelectChat }: ChatS
                 {groupChats.map(chat => {
                   const isActive = chat.id === currentSessionId
                   const firstMsg = chat.userRequests?.[0]
-                  const preview = firstMsg?.text
-                    ? firstMsg.text.length > 36 ? firstMsg.text.slice(0, 36) + '…' : firstMsg.text
-                    : 'Empty conversation'
+                  const preview = chat 
                   const isDeleting = deletingId === chat.id
                   const isHovered = hoveredId === chat.id
 
@@ -312,7 +312,7 @@ export function ChatSidebar({ currentSessionId, onNewChat, onSelectChat }: ChatS
                           lineHeight: 1.3,
                           transition: 'color 0.1s',
                         }}>
-                          {preview}
+                          {chat.name}
                         </div>
                         <div style={{
                           display: 'flex',

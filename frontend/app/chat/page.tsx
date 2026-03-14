@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Check, Bot, Wallet, Search, ShieldCheck } from "lucide-react";
+import { Send, Bot, Wallet, Search, ShieldCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +17,8 @@ import { ChatSidebar } from "@/components/chat-sidebar";
 
 import { useMetaMask } from "@/hooks/use-metamask";
 import { useToast } from "@/hooks/use-toast";
+
+const SESSION_STORAGE_KEY = "cart_blanche_session_id";
 
 interface Message {
   id: string;
@@ -92,15 +94,32 @@ function generateSessionId() {
   return `sess-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+// ── Get or create a persistent session ID from localStorage ──────────────────
+function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return generateSessionId();
+  const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (stored) return stored;
+  const newId = generateSessionId();
+  localStorage.setItem(SESSION_STORAGE_KEY, newId);
+  return newId;
+}
+
 export default function ChatPage() {
+  // Initialize sessionId from localStorage so it survives refresh
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window === "undefined") return generateSessionId();
+    return getOrCreateSessionId();
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() => generateSessionId());
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Track whether this session has been persisted to the DB yet
   const chatInitialized = useRef(false);
+  // Track whether we've named the chat yet
+  const chatNamed = useRef(false);
 
   const [graphState, setGraphState] = useState<GraphState>({
     _orchestrated: false,
@@ -122,14 +141,65 @@ export default function ChatPage() {
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
+  // ── On mount: reload the session from the DB if it exists ────────────────
+  useEffect(() => {
+    const storedId = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!storedId) {
+      setIsLoadingSession(false);
+      return;
+    }
+
+    fetch(`/api/chats/${storedId}`)
+      .then((res) => {
+        if (!res.ok) {
+          // Chat doesn't exist in DB yet — that's fine, start fresh
+          setIsLoadingSession(false);
+          return null;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!data?.data) return;
+        const timeline: {
+          role: "user" | "agent";
+          id: string;
+          type: string;
+          text: string;
+          timestamp: string;
+        }[] = data.data.timeline || [];
+
+        if (timeline.length > 0) {
+          const rebuilt: Message[] = timeline.map((item) => ({
+            id: item.id,
+            role: item.role === "user" ? "user" : "assistant",
+            content: item.text,
+            timestamp: new Date(item.timestamp),
+            agentName: item.role === "agent" ? item.type : undefined,
+            status: "complete",
+          }));
+          setMessages(rebuilt);
+          chatInitialized.current = true;
+          chatNamed.current = true;
+          setGraphState({
+            _orchestrated: true,
+            _shopped: true,
+            _merchant_reviewed: true,
+            _mandate_generated: false,
+            _payment_confirmed: false,
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingSession(false));
+  }, []); // Only on mount
+
   // ── Ensure the chat session exists in the DB ─────────────────────────────
-  const ensureChatInDB = useCallback(async (id: string) => {
-    if (chatInitialized.current) return;
+  const ensureChatInDB = useCallback(async (id: string, name?: string) => {
     try {
       const res = await fetch("/api/chats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, ...(name && { name }) }),
       });
       if (res.ok) {
         chatInitialized.current = true;
@@ -162,11 +232,15 @@ export default function ChatPage() {
 
   // ── Reset state for a new chat ──────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
-    setSessionId(generateSessionId());
+    const newId = generateSessionId();
+    // Persist new session ID to localStorage
+    localStorage.setItem(SESSION_STORAGE_KEY, newId);
+    setSessionId(newId);
     setMessages([]);
     setInput("");
     setIsLoading(false);
     chatInitialized.current = false;
+    chatNamed.current = false;
     setGraphState({
       _orchestrated: false,
       _shopped: false,
@@ -189,7 +263,7 @@ export default function ChatPage() {
       if (!res.ok) throw new Error(data.error);
 
       const timeline: {
-        role: 'user' | 'agent';
+        role: "user" | "agent";
         id: string;
         type: string;
         text: string;
@@ -198,16 +272,19 @@ export default function ChatPage() {
 
       const rebuilt: Message[] = timeline.map((item) => ({
         id: item.id,
-        role: item.role === 'user' ? 'user' : 'assistant',
+        role: item.role === "user" ? "user" : "assistant",
         content: item.text,
         timestamp: new Date(item.timestamp),
-        agentName: item.role === 'agent' ? item.type : undefined,
-        status: 'complete',
+        agentName: item.role === "agent" ? item.type : undefined,
+        status: "complete",
       }));
 
       setMessages(rebuilt);
       setSessionId(selectedId);
-      chatInitialized.current = true; // already exists in DB
+      // Persist selected session to localStorage
+      localStorage.setItem(SESSION_STORAGE_KEY, selectedId);
+      chatInitialized.current = true;
+      chatNamed.current = true;
       setGraphState({
         _orchestrated: true,
         _shopped: true,
@@ -419,8 +496,16 @@ export default function ChatPage() {
     setInput("");
     setIsLoading(true);
 
-    // Create the chat record in DB on first message
-    await ensureChatInDB(sessionId);
+    // Create the chat record in DB on first message, using message as the chat name
+    const chatName = !chatNamed.current
+      ? userText.slice(0, 60) + (userText.length > 60 ? "…" : "")
+      : undefined;
+
+    await ensureChatInDB(sessionId, chatName);
+
+    if (!chatNamed.current && chatName) {
+      chatNamed.current = true;
+    }
 
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
@@ -443,13 +528,24 @@ export default function ChatPage() {
 
   const getAgentIcon = (agentName?: string) => {
     switch (agentName) {
-      case "Orchestrator":    return <Search     className="w-5 h-5 text-indigo-500" />;
-      case "ShoppingAgent":   return <Bot        className="w-5 h-5 text-emerald-500" />;
-      case "MerchantAgent":   return <Wallet     className="w-5 h-5 text-amber-500" />;
-      case "PaymentProcessor":return <ShieldCheck className="w-5 h-5 text-blue-500" />;
-      default:                return <Bot        className="w-5 h-5 text-primary" />;
+      case "Orchestrator":     return <Search      className="w-5 h-5 text-indigo-500" />;
+      case "ShoppingAgent":    return <Bot         className="w-5 h-5 text-emerald-500" />;
+      case "MerchantAgent":    return <Wallet      className="w-5 h-5 text-amber-500" />;
+      case "PaymentProcessor": return <ShieldCheck className="w-5 h-5 text-blue-500" />;
+      default:                 return <Bot         className="w-5 h-5 text-primary" />;
     }
   };
+
+  if (isLoadingSession) {
+    return (
+      <div className="flex h-[calc(100vh-64px)] items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm">Restoring your session…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[calc(100vh-64px)] bg-background w-full overflow-hidden">
@@ -463,7 +559,6 @@ export default function ChatPage() {
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden min-w-0">
-        {/* Right Side: Chat Area */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
           <ScrollArea ref={scrollRef} className="flex-1 p-6">
             <div className="max-w-4xl mx-auto space-y-8 pb-10">
@@ -484,11 +579,11 @@ export default function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => {
-                  const productList  = msg.role === "assistant" && msg.status === "complete"
+                  const productList = msg.role === "assistant" && msg.status === "complete"
                     ? parseProductList(msg.content) : null;
-                  const cartMandate  = msg.role === "assistant" && msg.status === "complete" && !productList
+                  const cartMandate = msg.role === "assistant" && msg.status === "complete" && !productList
                     ? parseCartMandate(msg.content) : null;
-                  const displayText  = (productList || cartMandate)
+                  const displayText = (productList || cartMandate)
                     ? stripJsonBlock(msg.content) : msg.content;
 
                   return (
