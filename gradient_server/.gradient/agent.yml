@@ -1,3 +1,0 @@
-agent_environment: main
-agent_name: shopping_concierge
-entrypoint_file: main.py
