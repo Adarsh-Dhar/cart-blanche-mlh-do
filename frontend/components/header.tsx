@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
+// ...existing code...
 import { useMetaMask } from "@/hooks/use-metamask";
 import { useState, useRef, useEffect } from "react";
 import { LogOut, User, ChevronDown, Loader2 } from "lucide-react";

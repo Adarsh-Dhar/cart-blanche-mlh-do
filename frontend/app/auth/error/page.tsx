@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams, Suspense } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { AlertCircle } from "lucide-react";
+import { Suspense } from "react";
 
 const errorMap: Record<string, { title: string; description: string }> = {
   Configuration: {

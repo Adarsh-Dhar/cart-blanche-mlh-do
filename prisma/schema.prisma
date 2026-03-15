@@ -3,8 +3,15 @@ generator client {
   output   = "../frontend/lib/generated/prisma"
 }
 
+generator py {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+  engineType           = "binary"
+}
+
 datasource db {
-  provider = "postgresql" 
+  provider = "postgresql",
 }
 
 model Vendor {

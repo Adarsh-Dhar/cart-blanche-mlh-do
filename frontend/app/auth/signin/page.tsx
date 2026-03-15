@@ -320,11 +320,7 @@ function SignInContent() {
           </a>
         </p>
       </div>
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+        {/* Font import and keyframes moved to globals.css to prevent hydration mismatch */}
     </div>
   );
 }

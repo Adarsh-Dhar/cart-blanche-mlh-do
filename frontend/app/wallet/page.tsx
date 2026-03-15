@@ -15,7 +15,7 @@ import {
   Key,
   Cpu,
 } from "lucide-react";
-import { useSmartWallet, type SmartWalletInfo } from "@/hooks/useSmartWallet";
+import { useSmartWallet, type SmartWalletInfo } from "@/hooks/useSmartwallet";
 
 // ── USDC contract on SKALE Base Sepolia (replace with actual address) ─────────
 const USDC_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" as `0x${string}`;
