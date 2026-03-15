@@ -1,24 +1,19 @@
 """
 graph.py — Cart-Blanche LangGraph (Smart Wallet + Session Key edition)
 =======================================================================
-Updated routing: settlement no longer waits for a MetaMask signature.
-Instead it checks for an active SmartWallet session key in Prisma and
-settles via ERC-4337 UserOperation automatically.
-
-New turn-by-turn flow:
+Turn-by-turn flow:
 
   Turn 1 — new shopping request
     orchestrator_node  →  shopping_node  →  STOP (show products)
 
-  Turn 2 — user says "Looks good"
+  Turn 2 — user says "Looks good"  (state restored from MemorySaver checkpoint)
     merchant_node  →  vault_node  →  settlement_node  →  END
-    (settlement is now AUTONOMOUS — no MetaMask popup)
+    (fully autonomous — no MetaMask popup)
 
-Key change from old graph:
-  OLD: Turn 2 stopped after vault to show CartMandateCard.
-       Turn 3 required a MetaMask signature to trigger settlement.
-  NEW: After vault, the graph immediately proceeds to settlement.
-       Settlement checks the DB for a session key and signs a UserOp.
+The critical fix vs the original: the entry router checks for product_list
+in the CURRENT checkpoint state (loaded by MemorySaver), NOT just the
+fields passed in init_state. This means "Looks good" correctly routes to
+merchant even though init_state only contains the new message.
 """
 
 from __future__ import annotations
@@ -50,12 +45,28 @@ _ALL_ROUTES: dict[str, str] = {
     END:             END,
 }
 
+_AFFIRMATION_KEYWORDS = {
+    "looks good", "confirm", "proceed", "yes", "ok", "approve",
+    "go ahead", "do it", "buy it", "let's do it", "sounds good",
+    "perfect", "great", "checkout", "purchase", "sure", "yep", "yup",
+}
+
 
 def _last_human_text(state: AgentState) -> str:
     for msg in reversed(state.get("messages", [])):
         if isinstance(msg, HumanMessage):
-            return msg.content
+            return msg.content.lower().strip()
+        if isinstance(msg, tuple) and msg[0] == "user":
+            return msg[1].lower().strip()
     return ""
+
+
+def _is_affirmation(text: str) -> bool:
+    import re
+    return any(
+        re.search(rf'\b{re.escape(k)}\b', text)
+        for k in _AFFIRMATION_KEYWORDS
+    )
 
 
 # ── Entry-point router ────────────────────────────────────────────────────────
@@ -64,17 +75,35 @@ def _entry_router(state: AgentState) -> str:
         logger.warning("[Router:entry] Step limit — forcing END.")
         return END
 
-    # Mandate exists but vault not yet run → vault (then settlement)
+    # Settlement already has receipts — END
+    if state.get("receipts") is not None:
+        return END
+
+    # Vault ran but settlement hasn't → settlement
+    if state.get("encrypted_budget") and state.get("cart_mandate") and not state.get("receipts"):
+        return "settlement"
+
+    # Mandate exists but vault not yet run → vault
     if state.get("cart_mandate") and not state.get("encrypted_budget"):
         return "vault"
 
-    # Mandate + vault done but not yet settled → settlement
-    if state.get("cart_mandate") and state.get("encrypted_budget") and not state.get("receipts"):
-        return "settlement"
+    # Check if the latest human message is an affirmation
+    last_text = _last_human_text(state)
+    if last_text and _is_affirmation(last_text):
+        # If we have products staged → go to merchant
+        if state.get("product_list") is not None and len(state.get("product_list", [])) > 0:
+            logger.info("[Router:entry] Affirmation + product_list → merchant")
+            return "merchant"
+        # Products might already have been shown in a previous turn,
+        # cart_mandate not set yet → merchant
+        if not state.get("cart_mandate"):
+            logger.info("[Router:entry] Affirmation (no product_list in state) → orchestrator to re-shop")
+            # Fall through to orchestrator which will re-run shopping if needed
 
-    # Products shown, awaiting "Looks good" → merchant
+    # Products shown, no mandate yet → wait (this path means we just finished shopping)
     if state.get("product_list") is not None and not state.get("cart_mandate"):
-        return "merchant"
+        # We are here only if it's NOT an affirmation — just showed products, waiting
+        return END
 
     # Plan set but not yet searched → shopping
     if state.get("project_plan") and not state.get("_shopped"):
@@ -90,23 +119,23 @@ def _post_node_router(state: AgentState) -> str:
         logger.warning("[Router:post] Step limit — forcing END.")
         return END
 
-    # orchestrator just ran → automatically proceed to shopping
+    # orchestrator just ran → shopping
     if state.get("_orchestrated") and not state.get("_shopped"):
         return "shopping"
 
-    # shopping just ran → STOP, show products, wait for "Looks good"
+    # shopping just ran → STOP, show products, wait for confirmation
     if state.get("_shopped") and not state.get("cart_mandate"):
         return END
 
-    # merchant just set mandate → run vault
+    # merchant just set mandate → vault
     if state.get("cart_mandate") and not state.get("encrypted_budget"):
         return "vault"
 
-    # vault just ran → proceed directly to settlement (no signature needed)
+    # vault just ran → settlement
     if state.get("encrypted_budget") and state.get("cart_mandate") and not state.get("receipts"):
         return "settlement"
 
-    # settlement just ran → always END
+    # settlement complete → END
     if state.get("receipts") is not None:
         return END
 

@@ -14,6 +14,7 @@ load_dotenv(os.path.join(_here, "..", ".env"))
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from fastapi import Body, FastAPI
@@ -44,19 +45,30 @@ app.add_middleware(
 app.include_router(wallet_router, prefix="/api")
 
 _graph = build_graph()
-logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready (Smart Wallet mode).")
+logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready.")
 
-# session_id → Prisma Chat.id
 _session_chat: dict[str, str] = {}
+_session_has_products: set[str] = set()
+
+_AFFIRMATION_KEYWORDS = {
+    "looks good", "confirm", "proceed", "yes", "ok", "approve",
+    "go ahead", "do it", "buy it", "let's do it", "sounds good",
+    "perfect", "great", "checkout", "purchase", "sure", "yep", "yup",
+}
+
+
+def _is_affirmation(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(
+        re.search(rf'\b{re.escape(k)}\b', lower)
+        for k in _AFFIRMATION_KEYWORDS
+    )
 
 
 async def _ensure_chat(session_id: str) -> str:
-    """Get or create a Prisma Chat record for this session."""
     if session_id in _session_chat:
         return _session_chat[session_id]
     db = await get_db()
-    # Prisma Python uses lowercase model names
-    # Try to find an existing chat with this id first (frontend may have created it)
     try:
         existing = await db.chat.find_unique(where={"id": session_id})
         if existing:
@@ -64,20 +76,14 @@ async def _ensure_chat(session_id: str) -> str:
             return existing.id
     except Exception:
         pass
-    # Create new
     chat = await db.chat.create(data={"id": session_id})
     _session_chat[session_id] = chat.id
-    logger.info("[DB] Chat %s created for session %s", chat.id, session_id)
     return chat.id
 
 
 async def _save_user_request(chat_id: str, text: str, request_type: str) -> str:
     db = await get_db()
-    req = await db.userrequest.create(data={
-        "type":   request_type,
-        "text":   text,
-        "chatId": chat_id,
-    })
+    req = await db.userrequest.create(data={"type": request_type, "text": text, "chatId": chat_id})
     return req.id
 
 
@@ -120,19 +126,15 @@ async def run_sse(payload: Any = Body(None)):
 
     async def event_generator():
         if not user_text.strip():
-            yield _sse({"text": "⚠️ Empty message received. Please type something!"})
+            yield _sse({"text": "Empty message received."})
             yield "data: [DONE]\n\n"
             return
 
-        lower = user_text.lower().strip()
-        if any(k in lower for k in ("looks good", "confirm", "proceed", "yes", "ok")):
-            request_type = "AFFIRMATION"
-        else:
-            request_type = "DISCOVERY"
+        is_affirm    = _is_affirmation(user_text)
+        request_type = "AFFIRMATION" if is_affirm else "DISCOVERY"
 
         chat_id         = None
         user_request_id = None
-
         try:
             chat_id         = await _ensure_chat(session_id)
             user_request_id = await _save_user_request(chat_id, user_text, request_type)
@@ -142,33 +144,75 @@ async def run_sse(payload: Any = Body(None)):
         try:
             config = {"configurable": {"thread_id": session_id}}
 
-            init_state: dict = {
-                "messages":        [("user", user_text)],
-                "chat_id":         chat_id,
-                "user_request_id": user_request_id,
-            }
+            if is_affirm and session_id in _session_has_products:
+                logger.info("[run_sse] Affirmation — using checkpoint state for %s", session_id)
+                init_state: dict = {
+                    "messages":        [("user", user_text)],
+                    "chat_id":         chat_id,
+                    "user_request_id": user_request_id,
+                }
+            else:
+                if is_affirm:
+                    logger.warning("[run_sse] Affirmation but no staged products for %s", session_id)
+                init_state = {
+                    "messages":         [("user", user_text)],
+                    "chat_id":          chat_id,
+                    "user_request_id":  user_request_id,
+                    "query":            user_text,
+                    "project_plan":     None,
+                    "budget_usd":       None,
+                    "item_preferences": None,
+                    "product_list":     None,
+                    "cart_mandate":     None,
+                    "encrypted_budget": None,
+                    "receipts":         None,
+                    "_orchestrated":    False,
+                    "_shopped":         False,
+                    "steps":            0,
+                }
+
+            # Track which message IDs we've already sent to avoid duplicates.
+            # stream_mode="values" re-emits the full message list after every node,
+            # so without deduplication the same message gets sent multiple times.
+            sent_message_ids: set[int] = set()
 
             async for event in _graph.astream(init_state, config=config, stream_mode="values"):
                 messages = event.get("messages", [])
                 if not messages:
                     continue
 
-                last = messages[-1]
-                if not isinstance(last, AIMessage):
-                    continue
+                # Emit only NEW messages in this event snapshot
+                for msg in messages:
+                    if not isinstance(msg, AIMessage):
+                        continue
 
-                text = getattr(last, "content", None) or str(last)
-                if not text:
-                    continue
+                    # Use object identity as a dedup key
+                    msg_key = id(msg)
+                    if msg_key in sent_message_ids:
+                        continue
+                    sent_message_ids.add(msg_key)
 
-                agent_name = getattr(last, "name", None) or "Agent"
-                yield _sse({"text": text, "agent": agent_name})
+                    text_content = getattr(msg, "content", None) or str(msg)
+                    if not text_content:
+                        continue
+
+                    agent_name = getattr(msg, "name", None) or "Agent"
+                    logger.info("[run_sse] Emitting from %s: %s…", agent_name, str(text_content)[:80])
+                    yield _sse({"text": text_content, "agent": agent_name})
+
+                # Update product staging state
+                if event.get("product_list"):
+                    _session_has_products.add(session_id)
+                    logger.info("[run_sse] Products staged for %s", session_id)
+                if event.get("receipts") is not None:
+                    _session_has_products.discard(session_id)
+                    logger.info("[run_sse] Settlement done, cleared staging for %s", session_id)
 
             yield "data: [DONE]\n\n"
 
         except Exception as exc:
             logger.exception("[run_sse] Stream error")
-            yield _sse({"text": f"⚠️ Server error: {exc}"})
+            yield _sse({"text": f"Server error: {exc}"})
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -177,11 +221,11 @@ async def run_sse(payload: Any = Body(None)):
 @app.get("/health")
 async def health():
     return {
-        "status":      "ok",
-        "agents":      ["orchestrator", "shopping", "merchant", "vault", "settlement"],
-        "llm":         os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
-        "db":          "prisma/postgresql",
-        "wallet_flow": "ERC-4337 Smart Wallet + Session Key (no manual signatures)",
+        "status":  "ok",
+        "agents":  ["orchestrator", "shopping", "merchant", "vault", "settlement"],
+        "llm":     os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+        "db":      "prisma/postgresql",
+        "wallet":  "ERC-4337 Smart Wallet + Session Key",
     }
 
 

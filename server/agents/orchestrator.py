@@ -394,20 +394,20 @@ async def orchestrator_node(state: AgentState) -> dict:
                 "I'll prioritise the best fit."
             )
 
-    reply_parts = ["Got it! Here's what I'm sourcing for you:\n"]
-    for segment in plan.split(";"):
-        segment = segment.strip()
-        if ":" in segment:
-            cat, terms = segment.split(":", 1)
-            for term in [t.strip() for t in terms.split(",") if t.strip()]:
-                reply_parts.append(f"  - {term} ({cat.strip()})")
-    if budget > 0:
-        reply_parts.append(f"\nBudget: ${budget:.0f}")
-    if suggestion:
-        reply_parts.append(f"\nSuggestion: {suggestion}")
-    if budget_warn:
-        reply_parts.append(f"\nNote: {budget_warn}")
-    reply_parts.append("\nSearching the catalog now...")
+    # reply_parts = ["Got it! Here's what I'm sourcing for you:\n"]
+    # for segment in plan.split(";"):
+    #     segment = segment.strip()
+    #     if ":" in segment:
+    #         cat, terms = segment.split(":", 1)
+    #         for term in [t.strip() for t in terms.split(",") if t.strip()]:
+    #             reply_parts.append(f"  - {term} ({cat.strip()})")
+    # if budget > 0:
+    #     reply_parts.append(f"\nBudget: ${budget:.0f}")
+    # if suggestion:
+    #     reply_parts.append(f"\nSuggestion: {suggestion}")
+    # if budget_warn:
+    #     reply_parts.append(f"\nNote: {budget_warn}")
+    # reply_parts.append("\nSearching the catalog now...")
 
     plan_payload = json.dumps({
         "type": "PLAN", "plan": plan,
@@ -423,5 +423,5 @@ async def orchestrator_node(state: AgentState) -> dict:
         "_shopped":         False,
         "product_list":     None,
         "cart_mandate":     None,
-        "messages":         [AIMessage(content="\n".join(reply_parts), name="Orchestrator")],
+        "messages":         [AIMessage(content="\n", name="Orchestrator")],
     }
