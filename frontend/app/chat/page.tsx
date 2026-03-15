@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Bot, Wallet, Search, ShieldCheck } from "lucide-react";
+import { Send, Bot, Wallet, Search, ShieldCheck, Zap } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,12 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { TransactionReceipt } from "@/components/TransactionReceipt";
-import { CartMandateCard, type CartMandateData } from "@/components/cart-mandate-card";
 import MarkdownProductCards from "./MarkdownProductCards";
 import { ProductListCard, type ProductListData } from "./ProductListCard";
 import { ChatSidebar } from "@/components/chat-sidebar";
+import Link from "next/link";
 
-import { useMetaMask } from "@/hooks/use-metamask";
 import { useToast } from "@/hooks/use-toast";
 
 const SESSION_STORAGE_KEY = "cart_blanche_session_id";
@@ -47,34 +46,13 @@ function parseProductList(content: string): ProductListData | null {
       return parsed as ProductListData;
     }
   } catch {}
-  const bareMatch = content.match(/(\{[\s\S]*"type"\s*:\s*"product_list"[\s\S]*\})/);
+  const bareMatch = content.match(
+    /(\{[\s\S]*"type"\s*:\s*"product_list"[\s\S]*\})/
+  );
   if (bareMatch?.[1]) {
     try {
       const parsed = JSON.parse(bareMatch[1]);
       if (parsed?.type === "product_list") return parsed as ProductListData;
-    } catch {}
-  }
-  return null;
-}
-
-function parseCartMandate(content: string): CartMandateData | null {
-  const fenced = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  const raw = fenced?.[1] ?? content;
-  try {
-    const parsed = JSON.parse(raw.trim());
-    if (parsed?.type === "cart_mandate" && parsed.merchant_address) {
-      const { type: _t, ...mandate } = parsed;
-      return mandate as CartMandateData;
-    }
-  } catch {}
-  const bareMatch = content.match(/(\{[\s\S]*"type"\s*:\s*"cart_mandate"[\s\S]*\})/);
-  if (bareMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(bareMatch[1]);
-      if (parsed?.type === "cart_mandate") {
-        const { type: _t, ...mandate } = parsed;
-        return mandate as CartMandateData;
-      }
     } catch {}
   }
   return null;
@@ -100,6 +78,72 @@ function getOrCreateSessionId(): string {
   return newId;
 }
 
+// ── Smart Wallet status banner ────────────────────────────────────────────────
+function SmartWalletBanner() {
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/wallet/session-key")
+      .then((r) => r.json())
+      .then((d) => setHasSession(!!d.data))
+      .catch(() => setHasSession(false));
+  }, []);
+
+  if (hasSession === null) return null;
+
+  if (hasSession) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 14px",
+          background: "hsl(66,100%,50%,0.06)",
+          border: "1px solid hsl(66,100%,50%,0.2)",
+          borderRadius: 8,
+          fontSize: 12,
+          color: "hsl(66,100%,50%)",
+        }}
+      >
+        <Zap size={13} />
+        <span>Smart Wallet authorized — agent will settle autonomously</span>
+      </div>
+    );
+  }
+
+  return (
+    <Link href="/wallet">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 14px",
+          background: "#0d1117",
+          border: "1px solid #1a2332",
+          borderRadius: 8,
+          fontSize: 12,
+          color: "#64748b",
+          cursor: "pointer",
+          transition: "all 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.borderColor = "hsl(66,100%,50%,0.3)";
+          (e.currentTarget as HTMLElement).style.color = "hsl(66,100%,50%)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.borderColor = "#1a2332";
+          (e.currentTarget as HTMLElement).style.color = "#64748b";
+        }}
+      >
+        <Wallet size={13} />
+        <span>Set up Smart Wallet for instant checkout →</span>
+      </div>
+    </Link>
+  );
+}
+
 export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string>(() => {
     if (typeof window === "undefined") return generateSessionId();
@@ -122,19 +166,22 @@ export default function ChatPage() {
     _payment_confirmed: false,
   });
 
-  const { isConnected, address, signMandate, connect } = useMetaMask();
   const { toast } = useToast();
 
   const scrollToBottom = () => {
     if (scrollRef.current) {
-      const el = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      const el = scrollRef.current.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      );
       if (el) el.scrollTop = el.scrollHeight;
     }
   };
 
-  useEffect(() => { scrollToBottom(); }, [messages]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
-  // ── On mount: reload the session from the DB if it exists ────────────────
+  // ── On mount: reload the session from the DB if it exists ─────────────────
   useEffect(() => {
     const storedId = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!storedId) {
@@ -144,10 +191,7 @@ export default function ChatPage() {
 
     fetch(`/api/chats/${storedId}`)
       .then((res) => {
-        if (!res.ok) {
-          setIsLoadingSession(false);
-          return null;
-        }
+        if (!res.ok) { setIsLoadingSession(false); return null; }
         return res.json();
       })
       .then((data) => {
@@ -185,7 +229,6 @@ export default function ChatPage() {
       .finally(() => setIsLoadingSession(false));
   }, []);
 
-  // ── Ensure the chat session exists in the DB ─────────────────────────────
   const ensureChatInDB = useCallback(async (id: string, name?: string) => {
     try {
       const res = await fetch("/api/chats", {
@@ -193,36 +236,35 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, ...(name && { name }) }),
       });
-      if (res.ok) {
-        chatInitialized.current = true;
-      }
+      if (res.ok) chatInitialized.current = true;
     } catch (err) {
       console.error("Failed to initialize chat in DB:", err);
     }
   }, []);
 
-  // ── Persist a user+agent turn to the DB ──────────────────────────────────
-  const saveMessageTurn = useCallback(async (
-    chatId: string,
-    userText: string,
-    agentText: string,
-    agentName: string,
-  ) => {
-    try {
-      await fetch(`/api/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userMessage: { type: "USER", text: userText },
-          agentMessage: { type: agentName || "AGENT", text: agentText },
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to save message turn:", err);
-    }
-  }, []);
+  const saveMessageTurn = useCallback(
+    async (
+      chatId: string,
+      userText: string,
+      agentText: string,
+      agentName: string
+    ) => {
+      try {
+        await fetch(`/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userMessage: { type: "USER", text: userText },
+            agentMessage: { type: agentName || "AGENT", text: agentText },
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to save message turn:", err);
+      }
+    },
+    []
+  );
 
-  // ── Reset state for a new chat ──────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
     const newId = generateSessionId();
     localStorage.setItem(SESSION_STORAGE_KEY, newId);
@@ -241,78 +283,67 @@ export default function ChatPage() {
     });
   }, []);
 
-  // ── Load an existing chat session from the DB ───────────────────────────────
-  const handleSelectChat = useCallback(async (selectedId: string) => {
-    if (selectedId === sessionId) return;
+  const handleSelectChat = useCallback(
+    async (selectedId: string) => {
+      if (selectedId === sessionId) return;
+      setIsLoading(true);
+      setMessages([]);
+      try {
+        const res = await fetch(`/api/chats/${selectedId}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
 
-    setIsLoading(true);
-    setMessages([]);
+        const timeline: {
+          role: "user" | "agent";
+          id: string;
+          type: string;
+          text: string;
+          timestamp: string;
+        }[] = data.data?.timeline || [];
 
-    try {
-      const res = await fetch(`/api/chats/${selectedId}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+        const rebuilt: Message[] = timeline.map((item) => ({
+          id: item.id,
+          role: item.role === "user" ? "user" : "assistant",
+          content: item.text,
+          timestamp: new Date(item.timestamp),
+          agentName: item.role === "agent" ? item.type : undefined,
+          status: "complete",
+        }));
 
-      const timeline: {
-        role: "user" | "agent";
-        id: string;
-        type: string;
-        text: string;
-        timestamp: string;
-      }[] = data.data?.timeline || [];
-
-      const rebuilt: Message[] = timeline.map((item) => ({
-        id: item.id,
-        role: item.role === "user" ? "user" : "assistant",
-        content: item.text,
-        timestamp: new Date(item.timestamp),
-        agentName: item.role === "agent" ? item.type : undefined,
-        status: "complete",
-      }));
-
-      setMessages(rebuilt);
-      setSessionId(selectedId);
-      localStorage.setItem(SESSION_STORAGE_KEY, selectedId);
-      chatInitialized.current = true;
-      chatNamed.current = true;
-      setGraphState({
-        _orchestrated: true,
-        _shopped: true,
-        _merchant_reviewed: true,
-        _mandate_generated: false,
-        _payment_confirmed: false,
-      });
-    } catch {
-      toast({ title: "Failed to load chat", variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [sessionId, toast]);
+        setMessages(rebuilt);
+        setSessionId(selectedId);
+        localStorage.setItem(SESSION_STORAGE_KEY, selectedId);
+        chatInitialized.current = true;
+        chatNamed.current = true;
+      } catch {
+        toast({ title: "Failed to load chat", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [sessionId, toast]
+  );
 
   // ── Shared streaming reader ───────────────────────────────────────────────
-  // KEY DESIGN: content + agentName are plain synchronous variables updated on
-  // every chunk. We NEVER read values back out of setMessages callbacks —
-  // React batches those asynchronously and they are NOT guaranteed to have run
-  // by the time we return. currentContent is always correct at return time.
   const streamResponse = async (
     res: Response,
-    chatId: string,
+    _chatId: string
   ): Promise<{ content: string; agentName: string }> => {
-    const reader  = res.body!.getReader();
+    const reader = res.body!.getReader();
     const decoder = new TextDecoder();
 
-    // Plain synchronous accumulators — the source of truth for DB saving
     let currentContent = "";
-    let currentAgent   = "Agent";
-    // Latches the last non-empty content before any end-event reset
-    let finalContent   = "";
-    let finalAgent     = "Agent";
+    let currentAgent = "Agent";
+    let finalContent = "";
+    let finalAgent = "Agent";
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      for (const line of decoder.decode(value, { stream: true }).split("\n")) {
+      for (const line of decoder
+        .decode(value, { stream: true })
+        .split("\n")) {
         if (!line.startsWith("data: ")) continue;
         const dataStr = line.slice(6).trim();
         if (!dataStr || dataStr === "[DONE]") continue;
@@ -321,13 +352,12 @@ export default function ChatPage() {
           const data = JSON.parse(dataStr);
 
           if (data.type === "state_update") {
-            setGraphState(prev => ({ ...prev, ...data.state }));
+            setGraphState((prev) => ({ ...prev, ...data.state }));
             continue;
           }
 
-          // Agent switch — close the previous streaming bubble in the UI
           if (data.agent && data.agent !== currentAgent) {
-            setMessages(prev => {
+            setMessages((prev) => {
               const arr = [...prev];
               const last = arr[arr.length - 1];
               if (last?.role === "assistant" && last.status === "streaming") {
@@ -336,7 +366,7 @@ export default function ChatPage() {
               return arr;
             });
             currentContent = "";
-            currentAgent   = data.agent;
+            currentAgent = data.agent;
           } else if (data.agent) {
             currentAgent = data.agent;
           }
@@ -345,29 +375,32 @@ export default function ChatPage() {
             const textChunk = data?.content?.parts?.[0]?.text;
             if (!textChunk) continue;
 
-            // Accumulate synchronously — this is what we return for DB saving
             currentContent += textChunk;
 
-            const hasProductList = currentContent.includes('"type": "product_list"') || currentContent.includes('"type":"product_list"');
-            const hasMandate     = currentContent.includes('"type": "cart_mandate"') || currentContent.includes('"type":"cart_mandate"');
-            const displayText    = (hasProductList || hasMandate)
+            const hasProductList =
+              currentContent.includes('"type": "product_list"') ||
+              currentContent.includes('"type":"product_list"');
+            const displayText = hasProductList
               ? stripJsonBlock(currentContent)
               : currentContent.replace(/```json[\s\S]*$/, "");
 
-            // UI update only — do NOT try to read values back out of this callback
-            setMessages(prev => {
-              const arr  = [...prev];
+            setMessages((prev) => {
+              const arr = [...prev];
               const last = arr[arr.length - 1];
-              if (last?.role === "assistant" && last.status === "streaming" && last.agentName === currentAgent) {
+              if (
+                last?.role === "assistant" &&
+                last.status === "streaming" &&
+                last.agentName === currentAgent
+              ) {
                 last.content = displayText || currentContent;
               } else {
                 arr.push({
-                  id:        Date.now().toString(),
-                  role:      "assistant",
+                  id: Date.now().toString(),
+                  role: "assistant",
                   agentName: currentAgent,
-                  content:   displayText || currentContent,
+                  content: displayText || currentContent,
                   timestamp: new Date(),
-                  status:    "streaming",
+                  status: "streaming",
                 });
               }
               return arr;
@@ -375,29 +408,26 @@ export default function ChatPage() {
           }
 
           if (data.type === "end") {
-            // Latch before resetting — this is what we'll return for DB saving
             if (currentContent) {
               finalContent = currentContent;
-              finalAgent   = currentAgent;
+              finalAgent = currentAgent;
             }
-            setMessages(prev => {
-              const arr  = [...prev];
+            setMessages((prev) => {
+              const arr = [...prev];
               const last = arr[arr.length - 1];
               if (last?.role === "assistant" && last.status === "streaming") {
                 last.status = "complete";
               }
               return arr;
             });
-            // Reset for any follow-up agent message in the same stream
             currentContent = "";
           }
         } catch {}
       }
     }
 
-    // Safety-net: mark any still-streaming bubble complete
-    setMessages(prev => {
-      const arr  = [...prev];
+    setMessages((prev) => {
+      const arr = [...prev];
       const last = arr[arr.length - 1];
       if (last?.role === "assistant" && last.status === "streaming") {
         last.status = "complete";
@@ -405,26 +435,29 @@ export default function ChatPage() {
       return arr;
     });
 
-    // finalContent latched the last non-empty content before any end-event reset
-    // Fall back to currentContent in case the stream ended without an "end" event
     return {
-      content:   finalContent || currentContent,
-      agentName: finalAgent   || currentAgent,
+      content: finalContent || currentContent,
+      agentName: finalAgent || currentAgent,
     };
   };
-  // ── "Looks Good" button → trigger merchant flow ─────────────────────────
+
+  // ── "Looks Good" button → trigger merchant/settlement flow ───────────────
+  // Now the agent checks for a session key and settles autonomously —
+  // no CartMandateCard, no MetaMask popup during settlement.
   const handleLooksGood = async () => {
     const userText = "Looks good";
     setIsLoading(true);
 
-    // 1. Push user message to UI immediately
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: "user",
-      content: userText,
-      timestamp: new Date(),
-      status: "complete",
-    }]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: "user",
+        content: userText,
+        timestamp: new Date(),
+        status: "complete",
+      },
+    ]);
 
     await ensureChatInDB(sessionId);
 
@@ -436,110 +469,61 @@ export default function ChatPage() {
       });
       if (!res.body) throw new Error("No response body");
 
-      // 2. Stream + get back final agent content
-      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
+      const { content: agentContent, agentName } = await streamResponse(
+        res,
+        sessionId
+      );
 
-      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
       if (agentContent) {
-        await saveMessageTurn(sessionId, userText, stripJsonBlock(agentContent) || agentContent, agentName);
+        await saveMessageTurn(
+          sessionId,
+          userText,
+          stripJsonBlock(agentContent) || agentContent,
+          agentName
+        );
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(), role: "system",
-        content: `Error: ${err.message}`, timestamp: new Date(), status: "error",
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "system",
+          content: `Error: ${err.message}`,
+          timestamp: new Date(),
+          status: "error",
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // ── CartMandateCard "Sign & Pay" → MetaMask → settlement ────────────────
-  const handleMandateSign = async (mandate: CartMandateData) => {
-    const eip712Payload = {
-      domain: {
-        name:    "CartBlanche",
-        version: "1",
-        chainId: mandate.chain_id ?? 324705682,
-      },
-      types: {
-        CartMandate: [
-          { name: "merchant_address", type: "address" },
-          { name: "amount",           type: "uint256" },
-          { name: "currency",         type: "string"  },
-        ],
-      },
-      primaryType: "CartMandate",
-      message: {
-        merchant_address: mandate.merchant_address,
-        amount:           mandate.amount,
-        currency:         mandate.currency,
-      },
-    };
-
-    const signature = await signMandate(eip712Payload);
-    const sigMessage = `Here is my signature for the CartMandate: ${signature}`;
-
-    // 1. Push user signature message to UI immediately
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: "user",
-      content: sigMessage,
-      timestamp: new Date(),
-      status: "complete",
-    }]);
-
-    await ensureChatInDB(sessionId);
-    setIsLoading(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/run_sse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message: sigMessage }),
-      });
-      if (!res.body) throw new Error("No response body");
-
-      // 2. Stream + get back final agent content
-      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
-
-      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
-      if (agentContent) {
-        await saveMessageTurn(sessionId, sigMessage, stripJsonBlock(agentContent) || agentContent, agentName);
-      }
-
-      setGraphState(prev => ({ ...prev, _payment_confirmed: true }));
-    } catch (err: any) {
-      toast({ title: "Settlement failed", description: String(err), variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // ── Main send ────────────────────────────────────────────────────────────
+  // ── Main send ─────────────────────────────────────────────────────────────
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userText = input.trim();
 
-    // 1. Push user message to UI immediately
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(), role: "user",
-      content: userText, timestamp: new Date(), status: "complete",
-    }]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: "user",
+        content: userText,
+        timestamp: new Date(),
+        status: "complete",
+      },
+    ]);
     setInput("");
     setIsLoading(true);
 
-    // Name the chat on the very first message
     const chatName = !chatNamed.current
       ? userText.slice(0, 60) + (userText.length > 60 ? "…" : "")
       : undefined;
 
     await ensureChatInDB(sessionId, chatName);
-
-    if (!chatNamed.current && chatName) {
-      chatNamed.current = true;
-    }
+    if (!chatNamed.current && chatName) chatNamed.current = true;
 
     try {
       const res = await fetch("http://localhost:8000/run_sse", {
@@ -549,19 +533,31 @@ export default function ChatPage() {
       });
       if (!res.body) throw new Error("No response body");
 
-      // 2. Stream + get back final agent content
-      const { content: agentContent, agentName } = await streamResponse(res, sessionId);
+      const { content: agentContent, agentName } = await streamResponse(
+        res,
+        sessionId
+      );
 
-      // 3. Persist user + agent turn to DB (strip JSON blobs — save display text only)
       if (agentContent) {
-        await saveMessageTurn(sessionId, userText, stripJsonBlock(agentContent) || agentContent, agentName);
+        await saveMessageTurn(
+          sessionId,
+          userText,
+          stripJsonBlock(agentContent) || agentContent,
+          agentName
+        );
       }
-    } catch (error: any) {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(), role: "system",
-        content: "Failed to connect to the agent. Is the backend running?",
-        timestamp: new Date(), status: "error",
-      }]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "system",
+          content:
+            "Failed to connect to the agent. Is the backend running?",
+          timestamp: new Date(),
+          status: "error",
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -569,11 +565,16 @@ export default function ChatPage() {
 
   const getAgentIcon = (agentName?: string) => {
     switch (agentName) {
-      case "Orchestrator":     return <Search      className="w-5 h-5 text-indigo-500" />;
-      case "ShoppingAgent":    return <Bot         className="w-5 h-5 text-emerald-500" />;
-      case "MerchantAgent":    return <Wallet      className="w-5 h-5 text-amber-500" />;
-      case "PaymentProcessor": return <ShieldCheck className="w-5 h-5 text-blue-500" />;
-      default:                 return <Bot         className="w-5 h-5 text-primary" />;
+      case "Orchestrator":
+        return <Search className="w-5 h-5 text-indigo-500" />;
+      case "ShoppingAgent":
+        return <Bot className="w-5 h-5 text-emerald-500" />;
+      case "MerchantAgent":
+        return <Wallet className="w-5 h-5 text-amber-500" />;
+      case "PaymentProcessor":
+        return <ShieldCheck className="w-5 h-5 text-blue-500" />;
+      default:
+        return <Bot className="w-5 h-5 text-primary" />;
     }
   };
 
@@ -590,57 +591,95 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[calc(100vh-64px)] bg-background w-full overflow-hidden">
-
-      {/* ── Chat History Sidebar ─────────────────────────────────────────── */}
       <ChatSidebar
         currentSessionId={sessionId}
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
       />
 
-      {/* ── Main area ────────────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden min-w-0">
         <div className="flex-1 flex flex-col min-w-0 bg-background">
+          {/* Smart wallet banner at the top */}
+          <div className="px-6 pt-4 pb-0">
+            <SmartWalletBanner />
+          </div>
+
           <ScrollArea ref={scrollRef} className="flex-1 p-6">
             <div className="max-w-4xl mx-auto space-y-8 pb-10">
-
               {messages.length === 0 ? (
                 <div className="text-center mt-20 p-8 flex flex-col items-center">
                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6 border border-primary/20">
                     <Bot className="w-8 h-8" />
                   </div>
-                  <h2 className="text-2xl font-bold text-foreground mb-3 tracking-tight">Cart-Blanche Nova</h2>
+                  <h2 className="text-2xl font-bold text-foreground mb-3 tracking-tight">
+                    Cart-Blanche Nova
+                  </h2>
                   <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
-                    Describe what you need. I&apos;ll analyse intent, search live inventory, optimise your cart, and handle crypto-settlement securely.
+                    Describe what you need. I&apos;ll analyse intent, search
+                    live inventory, optimise your cart, and handle
+                    crypto-settlement automatically via your Smart Wallet.
                   </p>
                   <div className="mt-8 flex gap-3 justify-center flex-wrap">
-                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me stuff i need for my first day of school under $800")}>{"Back to school $800"}</Badge>
-                    <Badge variant="secondary" className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border" onClick={() => setInput("Buy me camping gear")}>{"Buy me camping gear"}</Badge>
+                    <Badge
+                      variant="secondary"
+                      className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border"
+                      onClick={() =>
+                        setInput(
+                          "Buy me stuff i need for my first day of school under $800"
+                        )
+                      }
+                    >
+                      {"Back to school $800"}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className="px-4 py-2 text-sm font-normal cursor-pointer hover:bg-muted transition-colors border border-border"
+                      onClick={() => setInput("Buy me camping gear")}
+                    >
+                      {"Buy me camping gear"}
+                    </Badge>
                   </div>
                 </div>
               ) : (
                 messages.map((msg) => {
-                  const productList = msg.role === "assistant" && msg.status === "complete"
-                    ? parseProductList(msg.content) : null;
-                  const cartMandate = msg.role === "assistant" && msg.status === "complete" && !productList
-                    ? parseCartMandate(msg.content) : null;
-                  const displayText = (productList || cartMandate)
-                    ? stripJsonBlock(msg.content) : msg.content;
+                  const productList =
+                    msg.role === "assistant" && msg.status === "complete"
+                      ? parseProductList(msg.content)
+                      : null;
+                  // NOTE: CartMandateCard removed — no more per-cart signing
+                  const displayText = productList
+                    ? stripJsonBlock(msg.content)
+                    : msg.content;
 
                   return (
-                    <div key={msg.id} className={`flex gap-4 ${msg.role === "user" ? "justify-end" : ""}`}>
+                    <div
+                      key={msg.id}
+                      className={`flex gap-4 ${
+                        msg.role === "user" ? "justify-end" : ""
+                      }`}
+                    >
                       {msg.role !== "user" && (
                         <Avatar className="w-10 h-10 border border-border bg-card flex items-center justify-center p-2 mt-1">
                           {getAgentIcon(msg.agentName)}
                         </Avatar>
                       )}
 
-                      <div className={`flex flex-col gap-1.5 max-w-[85%] ${msg.role === "user" ? "items-end" : ""} ${(productList || cartMandate) ? "w-full max-w-full" : ""}`}>
+                      <div
+                        className={`flex flex-col gap-1.5 max-w-[85%] ${
+                          msg.role === "user" ? "items-end" : ""
+                        } ${productList ? "w-full max-w-full" : ""}`}
+                      >
                         {msg.role !== "user" && (
                           <div className="flex items-center gap-2 pl-1">
-                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{msg.agentName || "System"}</span>
+                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                              {msg.agentName || "System"}
+                            </span>
                             <span className="text-[10px] text-muted-foreground/60 font-mono">
-                              {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                              {msg.timestamp.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
                             </span>
                           </div>
                         )}
@@ -662,27 +701,24 @@ export default function ChatPage() {
                             {displayText && (
                               <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border">
                                 <CardContent className="p-4 text-[15px] leading-relaxed">
-                                  <MarkdownProductCards>{displayText}</MarkdownProductCards>
+                                  <MarkdownProductCards>
+                                    {displayText}
+                                  </MarkdownProductCards>
                                 </CardContent>
                               </Card>
                             )}
-                            <ProductListCard data={productList} onConfirm={handleLooksGood} />
-                          </div>
-                        ) : cartMandate ? (
-                          <div className="w-full space-y-3">
-                            {displayText && (
-                              <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border">
-                                <CardContent className="p-4 text-[15px] leading-relaxed">
-                                  <MarkdownProductCards>{displayText}</MarkdownProductCards>
-                                </CardContent>
-                              </Card>
-                            )}
-                            <CartMandateCard mandate={cartMandate} onSign={handleMandateSign} />
+                            {/* ✅ ProductListCard — "Looks Good" now triggers autonomous settlement */}
+                            <ProductListCard
+                              data={productList}
+                              onConfirm={handleLooksGood}
+                            />
                           </div>
                         ) : (
                           <Card className="border-none shadow-sm bg-muted/40 rounded-2xl rounded-tl-sm border border-border">
                             <CardContent className="p-4 text-[15px] leading-relaxed">
-                              <MarkdownProductCards>{msg.content}</MarkdownProductCards>
+                              <MarkdownProductCards>
+                                {msg.content}
+                              </MarkdownProductCards>
                               {msg.status === "streaming" && (
                                 <span className="inline-block w-1.5 h-4 ml-1 bg-primary/60 animate-pulse align-middle" />
                               )}
@@ -695,25 +731,29 @@ export default function ChatPage() {
                 })
               )}
 
-              {isLoading && messages[messages.length - 1]?.role === "user" && (
-                <div className="flex gap-4">
-                  <Avatar className="w-10 h-10 border border-border bg-card flex items-center justify-center mt-1">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  </Avatar>
-                  <div className="bg-muted/40 border border-border p-4 rounded-2xl rounded-tl-sm shadow-sm w-24 flex justify-center items-center h-[52px]">
-                    <div className="flex gap-1.5">
-                      <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce" />
+              {isLoading &&
+                messages[messages.length - 1]?.role === "user" && (
+                  <div className="flex gap-4">
+                    <Avatar className="w-10 h-10 border border-border bg-card flex items-center justify-center mt-1">
+                      <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    </Avatar>
+                    <div className="bg-muted/40 border border-border p-4 rounded-2xl rounded-tl-sm shadow-sm w-24 flex justify-center items-center h-[52px]">
+                      <div className="flex gap-1.5">
+                        <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-2 h-2 bg-primary/40 rounded-full animate-bounce" />
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
             </div>
           </ScrollArea>
 
           <div className="p-6 bg-background border-t border-border">
-            <form onSubmit={handleSend} className="max-w-4xl mx-auto relative flex items-center">
+            <form
+              onSubmit={handleSend}
+              className="max-w-4xl mx-auto relative flex items-center"
+            >
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -731,10 +771,16 @@ export default function ChatPage() {
               </Button>
             </form>
             <div className="max-w-4xl mx-auto mt-3 flex justify-between items-center text-xs text-muted-foreground font-medium px-1">
-              <span>Press <kbd className="font-sans px-1.5 py-0.5 bg-muted rounded border border-border">Enter</kbd> to send</span>
+              <span>
+                Press{" "}
+                <kbd className="font-sans px-1.5 py-0.5 bg-muted rounded border border-border">
+                  Enter
+                </kbd>{" "}
+                to send
+              </span>
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary/60" />
-                Secure x402 End-to-End
+                Smart Wallet · x402 · Auto-settlement
               </span>
             </div>
           </div>

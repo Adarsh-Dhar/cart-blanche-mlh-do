@@ -1,8 +1,13 @@
 """
-main.py — Cart-Blanche API Server
-===================================
-Saves every user turn as a UserRequest and every agent reply as an
-AgentResponse in Prisma, keyed by session_id → Chat.
+main.py — Cart-Blanche API Server (Smart Wallet + Session Key edition)
+=======================================================================
+Changes from the old flow:
+  - Mounts /api/wallet/* routes (wallet_routes.py) for session-key management
+  - Passes chat_id into the graph state so settlement_node can look up
+    the SmartWallet record autonomously
+  - Removes the MetaMask signature parsing / SIGNATURE classification;
+    settlement is now triggered by "Looks good" → merchant_node → settlement_node
+    without any user signature
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from langchain_core.messages import AIMessage
 
 from .graph import build_graph
 from .db    import get_db
+from .routes.wallet_routes import wallet_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,7 +39,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Cart-Blanche API", version="2.0.0")
+app = FastAPI(title="Cart-Blanche API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,18 +49,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_graph = build_graph()
-logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready.")
+# Mount Smart Wallet routes under /api
+app.include_router(wallet_router, prefix="/api")
 
-# ── session_id → Prisma Chat.id  (in-memory; survives server lifetime) ────────
+_graph = build_graph()
+logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready (Smart Wallet mode).")
+
+# ── session_id → Prisma Chat.id ───────────────────────────────────────────────
 _session_chat: dict[str, str] = {}
 
 
 async def _ensure_chat(session_id: str) -> str:
-    """Return (or lazily create) the Prisma Chat record for this session."""
     if session_id in _session_chat:
         return _session_chat[session_id]
-
     db = await get_db()
     chat = await db.chat.create(data={})
     _session_chat[session_id] = chat.id
@@ -63,7 +70,6 @@ async def _ensure_chat(session_id: str) -> str:
 
 
 async def _save_user_request(chat_id: str, text: str, request_type: str) -> str:
-    """Persist a UserRequest and return its id."""
     db = await get_db()
     req = await db.userrequest.create(data={
         "type":   request_type,
@@ -116,13 +122,12 @@ async def run_sse(payload: Any = Body(None)):
             yield "data: [DONE]\n\n"
             return
 
-        # ── Classify request type & persist UserRequest ────────────────────
+        # ── Classify request type ─────────────────────────────────────────────
         lower = user_text.lower().strip()
         if any(k in lower for k in ("looks good", "confirm", "proceed", "yes", "ok")):
             request_type = "AFFIRMATION"
-        elif any(lower.startswith(sig) for sig in ("0x", "here is my signature")):
-            request_type = "SIGNATURE"
         else:
+            # NOTE: SIGNATURE type removed — no manual signatures in the new flow
             request_type = "DISCOVERY"
 
         try:
@@ -136,10 +141,10 @@ async def run_sse(payload: Any = Body(None)):
         try:
             config = {"configurable": {"thread_id": session_id}}
 
-            # Inject DB ids into graph state so agent nodes can persist responses
+            # Pass chat_id so settlement_node can find the SmartWallet record
             init_state: dict = {
-                "messages":       [("user", user_text)],
-                "chat_id":        chat_id,
+                "messages":        [("user", user_text)],
+                "chat_id":         chat_id,
                 "user_request_id": user_request_id,
             }
 
@@ -171,10 +176,11 @@ async def run_sse(payload: Any = Body(None)):
 @app.get("/health")
 async def health():
     return {
-        "status": "ok",
-        "agents": ["orchestrator", "shopping", "merchant", "vault", "settlement"],
-        "llm":    os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
-        "db":     "prisma/postgresql",
+        "status":       "ok",
+        "agents":       ["orchestrator", "shopping", "merchant", "vault", "settlement"],
+        "llm":          os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+        "db":           "prisma/postgresql",
+        "wallet_flow":  "ERC-4337 Smart Wallet + Session Key (no manual signatures)",
     }
 
 

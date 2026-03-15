@@ -176,6 +176,7 @@ export type ChatWhereInput = {
   lastUpdated?: Prisma.DateTimeFilter<"Chat"> | Date | string
   userRequests?: Prisma.UserRequestListRelationFilter
   agentResponses?: Prisma.AgentResponseListRelationFilter
+  smartWallets?: Prisma.SmartWalletListRelationFilter
 }
 
 export type ChatOrderByWithRelationInput = {
@@ -185,6 +186,7 @@ export type ChatOrderByWithRelationInput = {
   lastUpdated?: Prisma.SortOrder
   userRequests?: Prisma.UserRequestOrderByRelationAggregateInput
   agentResponses?: Prisma.AgentResponseOrderByRelationAggregateInput
+  smartWallets?: Prisma.SmartWalletOrderByRelationAggregateInput
 }
 
 export type ChatWhereUniqueInput = Prisma.AtLeast<{
@@ -197,6 +199,7 @@ export type ChatWhereUniqueInput = Prisma.AtLeast<{
   lastUpdated?: Prisma.DateTimeFilter<"Chat"> | Date | string
   userRequests?: Prisma.UserRequestListRelationFilter
   agentResponses?: Prisma.AgentResponseListRelationFilter
+  smartWallets?: Prisma.SmartWalletListRelationFilter
 }, "id">
 
 export type ChatOrderByWithAggregationInput = {
@@ -226,6 +229,7 @@ export type ChatCreateInput = {
   lastUpdated?: Date | string
   userRequests?: Prisma.UserRequestCreateNestedManyWithoutChatInput
   agentResponses?: Prisma.AgentResponseCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateInput = {
@@ -235,6 +239,7 @@ export type ChatUncheckedCreateInput = {
   lastUpdated?: Date | string
   userRequests?: Prisma.UserRequestUncheckedCreateNestedManyWithoutChatInput
   agentResponses?: Prisma.AgentResponseUncheckedCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatUpdateInput = {
@@ -244,6 +249,7 @@ export type ChatUpdateInput = {
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   userRequests?: Prisma.UserRequestUpdateManyWithoutChatNestedInput
   agentResponses?: Prisma.AgentResponseUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateInput = {
@@ -253,6 +259,7 @@ export type ChatUncheckedUpdateInput = {
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   userRequests?: Prisma.UserRequestUncheckedUpdateManyWithoutChatNestedInput
   agentResponses?: Prisma.AgentResponseUncheckedUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUncheckedUpdateManyWithoutChatNestedInput
 }
 
 export type ChatCreateManyInput = {
@@ -302,6 +309,11 @@ export type ChatScalarRelationFilter = {
   isNot?: Prisma.ChatWhereInput
 }
 
+export type ChatNullableScalarRelationFilter = {
+  is?: Prisma.ChatWhereInput | null
+  isNot?: Prisma.ChatWhereInput | null
+}
+
 export type ChatCreateNestedOneWithoutUserRequestsInput = {
   create?: Prisma.XOR<Prisma.ChatCreateWithoutUserRequestsInput, Prisma.ChatUncheckedCreateWithoutUserRequestsInput>
   connectOrCreate?: Prisma.ChatCreateOrConnectWithoutUserRequestsInput
@@ -330,12 +342,29 @@ export type ChatUpdateOneRequiredWithoutAgentResponsesNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.ChatUpdateToOneWithWhereWithoutAgentResponsesInput, Prisma.ChatUpdateWithoutAgentResponsesInput>, Prisma.ChatUncheckedUpdateWithoutAgentResponsesInput>
 }
 
+export type ChatCreateNestedOneWithoutSmartWalletsInput = {
+  create?: Prisma.XOR<Prisma.ChatCreateWithoutSmartWalletsInput, Prisma.ChatUncheckedCreateWithoutSmartWalletsInput>
+  connectOrCreate?: Prisma.ChatCreateOrConnectWithoutSmartWalletsInput
+  connect?: Prisma.ChatWhereUniqueInput
+}
+
+export type ChatUpdateOneWithoutSmartWalletsNestedInput = {
+  create?: Prisma.XOR<Prisma.ChatCreateWithoutSmartWalletsInput, Prisma.ChatUncheckedCreateWithoutSmartWalletsInput>
+  connectOrCreate?: Prisma.ChatCreateOrConnectWithoutSmartWalletsInput
+  upsert?: Prisma.ChatUpsertWithoutSmartWalletsInput
+  disconnect?: Prisma.ChatWhereInput | boolean
+  delete?: Prisma.ChatWhereInput | boolean
+  connect?: Prisma.ChatWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.ChatUpdateToOneWithWhereWithoutSmartWalletsInput, Prisma.ChatUpdateWithoutSmartWalletsInput>, Prisma.ChatUncheckedUpdateWithoutSmartWalletsInput>
+}
+
 export type ChatCreateWithoutUserRequestsInput = {
   id?: string
   name?: string
   startTime?: Date | string
   lastUpdated?: Date | string
   agentResponses?: Prisma.AgentResponseCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateWithoutUserRequestsInput = {
@@ -344,6 +373,7 @@ export type ChatUncheckedCreateWithoutUserRequestsInput = {
   startTime?: Date | string
   lastUpdated?: Date | string
   agentResponses?: Prisma.AgentResponseUncheckedCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatCreateOrConnectWithoutUserRequestsInput = {
@@ -368,6 +398,7 @@ export type ChatUpdateWithoutUserRequestsInput = {
   startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   agentResponses?: Prisma.AgentResponseUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateWithoutUserRequestsInput = {
@@ -376,6 +407,7 @@ export type ChatUncheckedUpdateWithoutUserRequestsInput = {
   startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   agentResponses?: Prisma.AgentResponseUncheckedUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUncheckedUpdateManyWithoutChatNestedInput
 }
 
 export type ChatCreateWithoutAgentResponsesInput = {
@@ -384,6 +416,7 @@ export type ChatCreateWithoutAgentResponsesInput = {
   startTime?: Date | string
   lastUpdated?: Date | string
   userRequests?: Prisma.UserRequestCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletCreateNestedManyWithoutChatInput
 }
 
 export type ChatUncheckedCreateWithoutAgentResponsesInput = {
@@ -392,6 +425,7 @@ export type ChatUncheckedCreateWithoutAgentResponsesInput = {
   startTime?: Date | string
   lastUpdated?: Date | string
   userRequests?: Prisma.UserRequestUncheckedCreateNestedManyWithoutChatInput
+  smartWallets?: Prisma.SmartWalletUncheckedCreateNestedManyWithoutChatInput
 }
 
 export type ChatCreateOrConnectWithoutAgentResponsesInput = {
@@ -416,6 +450,7 @@ export type ChatUpdateWithoutAgentResponsesInput = {
   startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   userRequests?: Prisma.UserRequestUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUpdateManyWithoutChatNestedInput
 }
 
 export type ChatUncheckedUpdateWithoutAgentResponsesInput = {
@@ -424,6 +459,59 @@ export type ChatUncheckedUpdateWithoutAgentResponsesInput = {
   startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   userRequests?: Prisma.UserRequestUncheckedUpdateManyWithoutChatNestedInput
+  smartWallets?: Prisma.SmartWalletUncheckedUpdateManyWithoutChatNestedInput
+}
+
+export type ChatCreateWithoutSmartWalletsInput = {
+  id?: string
+  name?: string
+  startTime?: Date | string
+  lastUpdated?: Date | string
+  userRequests?: Prisma.UserRequestCreateNestedManyWithoutChatInput
+  agentResponses?: Prisma.AgentResponseCreateNestedManyWithoutChatInput
+}
+
+export type ChatUncheckedCreateWithoutSmartWalletsInput = {
+  id?: string
+  name?: string
+  startTime?: Date | string
+  lastUpdated?: Date | string
+  userRequests?: Prisma.UserRequestUncheckedCreateNestedManyWithoutChatInput
+  agentResponses?: Prisma.AgentResponseUncheckedCreateNestedManyWithoutChatInput
+}
+
+export type ChatCreateOrConnectWithoutSmartWalletsInput = {
+  where: Prisma.ChatWhereUniqueInput
+  create: Prisma.XOR<Prisma.ChatCreateWithoutSmartWalletsInput, Prisma.ChatUncheckedCreateWithoutSmartWalletsInput>
+}
+
+export type ChatUpsertWithoutSmartWalletsInput = {
+  update: Prisma.XOR<Prisma.ChatUpdateWithoutSmartWalletsInput, Prisma.ChatUncheckedUpdateWithoutSmartWalletsInput>
+  create: Prisma.XOR<Prisma.ChatCreateWithoutSmartWalletsInput, Prisma.ChatUncheckedCreateWithoutSmartWalletsInput>
+  where?: Prisma.ChatWhereInput
+}
+
+export type ChatUpdateToOneWithWhereWithoutSmartWalletsInput = {
+  where?: Prisma.ChatWhereInput
+  data: Prisma.XOR<Prisma.ChatUpdateWithoutSmartWalletsInput, Prisma.ChatUncheckedUpdateWithoutSmartWalletsInput>
+}
+
+export type ChatUpdateWithoutSmartWalletsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  userRequests?: Prisma.UserRequestUpdateManyWithoutChatNestedInput
+  agentResponses?: Prisma.AgentResponseUpdateManyWithoutChatNestedInput
+}
+
+export type ChatUncheckedUpdateWithoutSmartWalletsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  startTime?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  lastUpdated?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  userRequests?: Prisma.UserRequestUncheckedUpdateManyWithoutChatNestedInput
+  agentResponses?: Prisma.AgentResponseUncheckedUpdateManyWithoutChatNestedInput
 }
 
 
@@ -434,11 +522,13 @@ export type ChatUncheckedUpdateWithoutAgentResponsesInput = {
 export type ChatCountOutputType = {
   userRequests: number
   agentResponses: number
+  smartWallets: number
 }
 
 export type ChatCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   userRequests?: boolean | ChatCountOutputTypeCountUserRequestsArgs
   agentResponses?: boolean | ChatCountOutputTypeCountAgentResponsesArgs
+  smartWallets?: boolean | ChatCountOutputTypeCountSmartWalletsArgs
 }
 
 /**
@@ -465,6 +555,13 @@ export type ChatCountOutputTypeCountAgentResponsesArgs<ExtArgs extends runtime.T
   where?: Prisma.AgentResponseWhereInput
 }
 
+/**
+ * ChatCountOutputType without action
+ */
+export type ChatCountOutputTypeCountSmartWalletsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.SmartWalletWhereInput
+}
+
 
 export type ChatSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
@@ -473,6 +570,7 @@ export type ChatSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   lastUpdated?: boolean
   userRequests?: boolean | Prisma.Chat$userRequestsArgs<ExtArgs>
   agentResponses?: boolean | Prisma.Chat$agentResponsesArgs<ExtArgs>
+  smartWallets?: boolean | Prisma.Chat$smartWalletsArgs<ExtArgs>
   _count?: boolean | Prisma.ChatCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["chat"]>
 
@@ -501,6 +599,7 @@ export type ChatOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = run
 export type ChatInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   userRequests?: boolean | Prisma.Chat$userRequestsArgs<ExtArgs>
   agentResponses?: boolean | Prisma.Chat$agentResponsesArgs<ExtArgs>
+  smartWallets?: boolean | Prisma.Chat$smartWalletsArgs<ExtArgs>
   _count?: boolean | Prisma.ChatCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type ChatIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {}
@@ -511,6 +610,7 @@ export type $ChatPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   objects: {
     userRequests: Prisma.$UserRequestPayload<ExtArgs>[]
     agentResponses: Prisma.$AgentResponsePayload<ExtArgs>[]
+    smartWallets: Prisma.$SmartWalletPayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -913,6 +1013,7 @@ export interface Prisma__ChatClient<T, Null = never, ExtArgs extends runtime.Typ
   readonly [Symbol.toStringTag]: "PrismaPromise"
   userRequests<T extends Prisma.Chat$userRequestsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Chat$userRequestsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$UserRequestPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   agentResponses<T extends Prisma.Chat$agentResponsesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Chat$agentResponsesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AgentResponsePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  smartWallets<T extends Prisma.Chat$smartWalletsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Chat$smartWalletsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$SmartWalletPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1384,6 +1485,30 @@ export type Chat$agentResponsesArgs<ExtArgs extends runtime.Types.Extensions.Int
   take?: number
   skip?: number
   distinct?: Prisma.AgentResponseScalarFieldEnum | Prisma.AgentResponseScalarFieldEnum[]
+}
+
+/**
+ * Chat.smartWallets
+ */
+export type Chat$smartWalletsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the SmartWallet
+   */
+  select?: Prisma.SmartWalletSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the SmartWallet
+   */
+  omit?: Prisma.SmartWalletOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.SmartWalletInclude<ExtArgs> | null
+  where?: Prisma.SmartWalletWhereInput
+  orderBy?: Prisma.SmartWalletOrderByWithRelationInput | Prisma.SmartWalletOrderByWithRelationInput[]
+  cursor?: Prisma.SmartWalletWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.SmartWalletScalarFieldEnum | Prisma.SmartWalletScalarFieldEnum[]
 }
 
 /**

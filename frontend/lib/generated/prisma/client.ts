@@ -81,3 +81,8 @@ export type UserRequest = Prisma.UserRequestModel
  * 
  */
 export type AgentResponse = Prisma.AgentResponseModel
+/**
+ * Model SmartWallet
+ * 
+ */
+export type SmartWallet = Prisma.SmartWalletModel

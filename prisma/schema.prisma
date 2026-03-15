@@ -115,10 +115,9 @@ model Chat {
   name          String          @default("")
   startTime     DateTime        @default(now())
   lastUpdated   DateTime        @updatedAt
-  
-  // Relations
   userRequests  UserRequest[]
   agentResponses AgentResponse[]
+  smartWallets  SmartWallet[]
 }
 
 model UserRequest {
@@ -149,4 +148,21 @@ model AgentResponse {
   // UserRequest Relation (Back-reference for the 1:1 link)
   userRequestId  String?      @unique
   userRequest    UserRequest? @relation("RequestToResponse")
+}
+
+model SmartWallet {
+  id                         String   @id @default(cuid())
+  ownerEoa                   String   @unique
+  smartWalletAddress         String   @unique
+  sessionKeyPublic           String
+  sessionKeyEncryptedPrivate String
+  spendLimitUsdc             Decimal  @db.Decimal(10, 2)
+  expiresAt                  DateTime
+  chatId                     String?
+  chat                       Chat?    @relation(fields: [chatId], references: [id])
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@index([ownerEoa])
+  @@index([smartWalletAddress])
 }

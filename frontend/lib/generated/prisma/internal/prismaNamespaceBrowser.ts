@@ -58,7 +58,8 @@ export const ModelName = {
   OrderItem: 'OrderItem',
   Chat: 'Chat',
   UserRequest: 'UserRequest',
-  AgentResponse: 'AgentResponse'
+  AgentResponse: 'AgentResponse',
+  SmartWallet: 'SmartWallet'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -180,6 +181,22 @@ export const AgentResponseScalarFieldEnum = {
 } as const
 
 export type AgentResponseScalarFieldEnum = (typeof AgentResponseScalarFieldEnum)[keyof typeof AgentResponseScalarFieldEnum]
+
+
+export const SmartWalletScalarFieldEnum = {
+  id: 'id',
+  ownerEoa: 'ownerEoa',
+  smartWalletAddress: 'smartWalletAddress',
+  sessionKeyPublic: 'sessionKeyPublic',
+  sessionKeyEncryptedPrivate: 'sessionKeyEncryptedPrivate',
+  spendLimitUsdc: 'spendLimitUsdc',
+  expiresAt: 'expiresAt',
+  chatId: 'chatId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type SmartWalletScalarFieldEnum = (typeof SmartWalletScalarFieldEnum)[keyof typeof SmartWalletScalarFieldEnum]
 
 
 export const SortOrder = {

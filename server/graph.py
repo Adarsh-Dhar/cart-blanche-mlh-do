@@ -1,25 +1,29 @@
 """
-graph.py — Cart-Blanche LangGraph
-==================================
-Wires the five agents into a directed graph with a linear post-node router
-that defaults to END after every node (no loops possible).
+graph.py — Cart-Blanche LangGraph (Smart Wallet + Session Key edition)
+=======================================================================
+Updated routing: settlement no longer waits for a MetaMask signature.
+Instead it checks for an active SmartWallet session key in Prisma and
+settles via ERC-4337 UserOperation automatically.
 
-Turn-by-turn conversation flow:
+New turn-by-turn flow:
 
-  Turn 1 — new request
+  Turn 1 — new shopping request
     orchestrator_node  →  shopping_node  →  STOP (show products)
 
   Turn 2 — user says "Looks good"
-    merchant_node  →  vault_node  →  STOP (show mandate, await MetaMask)
+    merchant_node  →  vault_node  →  settlement_node  →  END
+    (settlement is now AUTONOMOUS — no MetaMask popup)
 
-  Turn 3 — user pastes 0x signature
-    settlement_node  →  END (show receipts)
+Key change from old graph:
+  OLD: Turn 2 stopped after vault to show CartMandateCard.
+       Turn 3 required a MetaMask signature to trigger settlement.
+  NEW: After vault, the graph immediately proceeds to settlement.
+       Settlement checks the DB for a session key and signs a UserOp.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -37,18 +41,13 @@ from .agents import (
 
 logger = logging.getLogger(__name__)
 
-# EIP-712 signature pattern
-_SIG_RE = re.compile(r"0x[a-fA-F0-9]{130,}")
-
-# Complete route map used by both routers — LangGraph requires all possible
-# return values to be listed here.
 _ALL_ROUTES: dict[str, str] = {
     "orchestrator": "orchestrator",
     "shopping":     "shopping",
     "merchant":     "merchant",
     "vault":        "vault",
     "settlement":   "settlement",
-    END:            END,
+    END:             END,
 }
 
 
@@ -59,26 +58,21 @@ def _last_human_text(state: AgentState) -> str:
     return ""
 
 
-# ── Entry-point router ─────────────────────────────────────────────────────────
-# Called once per user turn; decides where to re-enter the graph to resume
-# an in-progress purchase flow, or starts fresh at the orchestrator.
-
+# ── Entry-point router ────────────────────────────────────────────────────────
 def _entry_router(state: AgentState) -> str:
     if state.get("steps", 0) >= MAX_STEPS:
         logger.warning("[Router:entry] Step limit — forcing END.")
         return END
 
-    user_text = _last_human_text(state)
-
-    # Signature pasted → settle
-    if state.get("cart_mandate") and _SIG_RE.search(user_text):
-        return "settlement"
-
-    # Mandate exists but vault not yet run → run vault (then STOP for sig)
+    # Mandate exists but vault not yet run → vault (then settlement)
     if state.get("cart_mandate") and not state.get("encrypted_budget"):
         return "vault"
 
-    # Products shown, awaiting approval → merchant
+    # Mandate + vault done but not yet settled → settlement
+    if state.get("cart_mandate") and state.get("encrypted_budget") and not state.get("receipts"):
+        return "settlement"
+
+    # Products shown, awaiting "Looks good" → merchant
     if state.get("product_list") is not None and not state.get("cart_mandate"):
         return "merchant"
 
@@ -90,10 +84,7 @@ def _entry_router(state: AgentState) -> str:
     return "orchestrator"
 
 
-# ── Post-node router ───────────────────────────────────────────────────────────
-# After each node completes, continue automatically ONLY when no user input
-# is needed for the next step; otherwise default to END.
-
+# ── Post-node router ──────────────────────────────────────────────────────────
 def _post_node_router(state: AgentState) -> str:
     if state.get("steps", 0) >= MAX_STEPS:
         logger.warning("[Router:post] Step limit — forcing END.")
@@ -103,17 +94,17 @@ def _post_node_router(state: AgentState) -> str:
     if state.get("_orchestrated") and not state.get("_shopped"):
         return "shopping"
 
-    # shopping just ran → STOP, show results, wait for "Looks good"
+    # shopping just ran → STOP, show products, wait for "Looks good"
     if state.get("_shopped") and not state.get("cart_mandate"):
         return END
 
-    # merchant just set mandate → run vault silently (no user input needed)
+    # merchant just set mandate → run vault
     if state.get("cart_mandate") and not state.get("encrypted_budget"):
         return "vault"
 
-    # vault just ran → STOP, wait for MetaMask signature
-    if state.get("encrypted_budget") and state.get("cart_mandate"):
-        return END
+    # vault just ran → proceed directly to settlement (no signature needed)
+    if state.get("encrypted_budget") and state.get("cart_mandate") and not state.get("receipts"):
+        return "settlement"
 
     # settlement just ran → always END
     if state.get("receipts") is not None:
@@ -122,8 +113,7 @@ def _post_node_router(state: AgentState) -> str:
     return END
 
 
-# ── Graph factory ──────────────────────────────────────────────────────────────
-
+# ── Graph factory ─────────────────────────────────────────────────────────────
 def build_graph() -> Any:
     builder = StateGraph(AgentState)
 
@@ -133,14 +123,12 @@ def build_graph() -> Any:
     builder.add_node("vault",        vault_node)
     builder.add_node("settlement",   settlement_node)
 
-    # One conditional entry — decides where to resume or start
     builder.set_conditional_entry_point(_entry_router, _ALL_ROUTES)
 
-    # All non-terminal nodes use the linear post-node router
     for node in ("orchestrator", "shopping", "merchant", "vault"):
         builder.add_conditional_edges(node, _post_node_router, _ALL_ROUTES)
 
-    # Settlement is always terminal
+    # Settlement is terminal
     builder.add_edge("settlement", END)
 
     return builder.compile(checkpointer=MemorySaver())

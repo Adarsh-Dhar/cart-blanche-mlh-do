@@ -391,7 +391,8 @@ export const ModelName = {
   OrderItem: 'OrderItem',
   Chat: 'Chat',
   UserRequest: 'UserRequest',
-  AgentResponse: 'AgentResponse'
+  AgentResponse: 'AgentResponse',
+  SmartWallet: 'SmartWallet'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -407,7 +408,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "vendor" | "category" | "product" | "order" | "orderItem" | "chat" | "userRequest" | "agentResponse"
+    modelProps: "vendor" | "category" | "product" | "order" | "orderItem" | "chat" | "userRequest" | "agentResponse" | "smartWallet"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1003,6 +1004,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    SmartWallet: {
+      payload: Prisma.$SmartWalletPayload<ExtArgs>
+      fields: Prisma.SmartWalletFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.SmartWalletFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.SmartWalletFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        findFirst: {
+          args: Prisma.SmartWalletFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.SmartWalletFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        findMany: {
+          args: Prisma.SmartWalletFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>[]
+        }
+        create: {
+          args: Prisma.SmartWalletCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        createMany: {
+          args: Prisma.SmartWalletCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.SmartWalletCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>[]
+        }
+        delete: {
+          args: Prisma.SmartWalletDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        update: {
+          args: Prisma.SmartWalletUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        deleteMany: {
+          args: Prisma.SmartWalletDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.SmartWalletUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.SmartWalletUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>[]
+        }
+        upsert: {
+          args: Prisma.SmartWalletUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SmartWalletPayload>
+        }
+        aggregate: {
+          args: Prisma.SmartWalletAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateSmartWallet>
+        }
+        groupBy: {
+          args: Prisma.SmartWalletGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SmartWalletGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.SmartWalletCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SmartWalletCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1145,6 +1220,22 @@ export const AgentResponseScalarFieldEnum = {
 } as const
 
 export type AgentResponseScalarFieldEnum = (typeof AgentResponseScalarFieldEnum)[keyof typeof AgentResponseScalarFieldEnum]
+
+
+export const SmartWalletScalarFieldEnum = {
+  id: 'id',
+  ownerEoa: 'ownerEoa',
+  smartWalletAddress: 'smartWalletAddress',
+  sessionKeyPublic: 'sessionKeyPublic',
+  sessionKeyEncryptedPrivate: 'sessionKeyEncryptedPrivate',
+  spendLimitUsdc: 'spendLimitUsdc',
+  expiresAt: 'expiresAt',
+  chatId: 'chatId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type SmartWalletScalarFieldEnum = (typeof SmartWalletScalarFieldEnum)[keyof typeof SmartWalletScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1363,6 +1454,7 @@ export type GlobalOmitConfig = {
   chat?: Prisma.ChatOmit
   userRequest?: Prisma.UserRequestOmit
   agentResponse?: Prisma.AgentResponseOmit
+  smartWallet?: Prisma.SmartWalletOmit
 }
 
 /* Types for Logging */
