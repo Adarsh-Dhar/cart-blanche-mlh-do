@@ -1,10 +1,13 @@
-generator client {
-  provider = "prisma-client"
-  output   = "../frontend/lib/generated/prisma"
+generator py {
+  provider                    = "prisma-client-py"
+  interface                   = "asyncio"
+  recursive_type_depth        = 5
+  enable_experimental_decimal = true
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Vendor {

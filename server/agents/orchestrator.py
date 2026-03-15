@@ -235,6 +235,11 @@ async def orchestrator_node(state: AgentState) -> dict:
         HumanMessage(content=query),
     ])
     content = response.content.strip()
+    # Strip markdown code fences if LLM wraps output
+    if "```" in content:
+        lines = [l for l in content.splitlines() if not l.strip().startswith("```")]
+        content = "\n".join(lines)
+    print(f"[DEBUG] Raw LLM response:\n{content}")
 
     plan        = ""
     budget      = 0.0
