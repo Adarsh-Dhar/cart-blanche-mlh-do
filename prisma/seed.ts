@@ -1,67 +1,54 @@
-// Use dynamic import for ESM compatibility with custom generator output
-import { PrismaClient } from '../frontend/lib/generated/prisma/client'; // Adjust path if your generated client is located elsewhere"
-import { PrismaPg } from '@prisma/adapter-pg'; // Required for v7 PostgreSQL
+import { PrismaClient } from '../frontend/lib/generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import "dotenv/config";
 
-// 1. Setup the Driver Adapter (New in v7)
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  console.error("❌ Error: DATABASE_URL is not defined in your environment.");
-  process.exit(1);
-}
-
-// Create a connection pool and adapter
-const pool = new pg.Pool({ connectionString: databaseUrl });
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool as any);
-
-// 2. Instantiate Client with the adapter
 const prisma = new PrismaClient({ adapter });
 
-
 async function main() {
-  // 1. Create Vendors (Competitors in the UCP Ecosystem)
-  const budgetStore = await prisma.vendor.upsert({
+  // 1. Create Digital Vendors
+  const infraVendor = await prisma.vendor.upsert({
     where: { pubkey: '0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9' },
     update: {},
     create: {
-      name: "ValueGear Essentials",
-      description: "Affordable school and office supplies for everyday needs.",
+      name: "BitCompute Cloud",
+      description: "High-performance GPU credits and API throughput vouchers.",
       pubkey: '0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9',
-      logoUrl: "https://api.placeholder.com/150/budget",
+      logoUrl: "https://api.placeholder.com/150/0000FF?text=BitCompute",
     },
   });
 
-  const midRangeStore = await prisma.vendor.upsert({
+  const creativeVendor = await prisma.vendor.upsert({
     where: { pubkey: '0x90C768dDfeA2352511FeEE464BED8b550994d3eB' },
     update: {},
     create: {
-      name: "Scholar's Choice",
-      description: "Quality brands and durable gear for serious students.",
+      name: "AssetStream Digital",
+      description: "Premium UI kits, 3D assets, and royalty-free cinematic audio.",
       pubkey: '0x90C768dDfeA2352511FeEE464BED8b550994d3eB',
-      logoUrl: "https://api.placeholder.com/150/scholar",
+      logoUrl: "https://api.placeholder.com/150/FF00FF?text=AssetStream",
     },
   });
 
-  const premiumStore = await prisma.vendor.upsert({
+  const softwareVendor = await prisma.vendor.upsert({
     where: { pubkey: '0xAE0F008660E94CB67203C2Eac3660C4e0Aff6948' },
     update: {},
     create: {
-      name: "Elite Academy Boutique",
-      description: "High-end stationery, designer tech, and premium apparel.",
+      name: "DevVault Pro",
+      description: "SaaS licenses, IDE plugins, and advanced developer certifications.",
       pubkey: '0xAE0F008660E94CB67203C2Eac3660C4e0Aff6948',
-      logoUrl: "https://api.placeholder.com/150/elite",
+      logoUrl: "https://api.placeholder.com/150/00FF00?text=DevVault",
     },
   });
 
   // 2. Create Categories
   const categories = [
-    { name: 'Backpacks', slug: 'backpacks' },
-    { name: 'Stationery', slug: 'stationery' },
-    { name: 'Electronics', slug: 'electronics' },
-    { name: 'Apparel', slug: 'apparel' },
-    { name: 'Lunchware', slug: 'lunchware' },
+    { name: 'Cloud & Compute', slug: 'compute' },
+    { name: 'Creative Assets', slug: 'creative' },
+    { name: 'SaaS Subscriptions', slug: 'saas' },
+    { name: 'Developer Tools', slug: 'dev-tools' },
+    { name: 'Education Vouchers', slug: 'edu' },
   ];
 
   const categoryMap: Record<string, string> = {};
@@ -74,118 +61,46 @@ async function main() {
     categoryMap[cat.name] = created.id;
   }
 
-  // 3. Helper for generating product tiers
-  const generateTieredProducts = async (
-    baseName: string,
-    categoryName: string,
-    baseSku: string,
-    basePrice: number
-  ) => {
-    const catId = categoryMap[categoryName];
-
-    return [
-      // Budget Tier
-      {
-        productID: `${baseSku}-BGT`,
-        sku: `${baseSku}-BGT`,
-        name: `Basic ${baseName}`,
-        description: `Economy version of ${baseName.toLowerCase()} for daily use.`,
-        price: basePrice * 0.7,
-        vendorId: budgetStore.id,
-        categoryId: catId,
-        stockQuantity: 500,
-        images: ["https://api.placeholder.com/400/300?text=Budget+Item"],
-      },
-      // Mid-Range Tier
-      {
-        productID: `${baseSku}-MID`,
-        sku: `${baseSku}-MID`,
-        name: `Standard ${baseName}`,
-        description: `Durable and reliable ${baseName.toLowerCase()} with a 1-year warranty.`,
-        price: basePrice,
-        vendorId: midRangeStore.id,
-        categoryId: catId,
-        stockQuantity: 200,
-        images: ["https://api.placeholder.com/400/300?text=Standard+Item"],
-      },
-      // Premium Tier
-      {
-        productID: `${baseSku}-PRM`,
-        sku: `${baseSku}-PRM`,
-        name: `Pro ${baseName} Plus`,
-        description: `Professional grade ${baseName.toLowerCase()} featuring ergonomic design and premium materials.`,
-        price: basePrice * 2.5,
-        vendorId: premiumStore.id,
-        categoryId: catId,
-        stockQuantity: 50,
-        images: ["https://api.placeholder.com/400/300?text=Premium+Item"],
-      },
-    ];
-  };
-
-  // 4. Generate the List (34 types * 3 tiers = 102 Products)
-  const productTemplates = [
-    { name: 'Backpack', cat: 'Backpacks', sku: 'BPK', price: 40 },
-    { name: 'Laptop Sleeve', cat: 'Backpacks', sku: 'SLV', price: 25 },
-    { name: 'Notebook (3-Pack)', cat: 'Stationery', sku: 'NTB', price: 12 },
-    { name: 'Gel Pen Set', cat: 'Stationery', sku: 'PEN', price: 8 },
-    { name: 'Mechanical Pencil', cat: 'Stationery', sku: 'PCL', price: 5 },
-    { name: 'Highlighter Set', cat: 'Stationery', sku: 'HLT', price: 6 },
-    { name: 'Scientific Calculator', cat: 'Electronics', sku: 'CAL', price: 30 },
-    { name: 'Noise Cancelling Headphones', cat: 'Electronics', sku: 'HPN', price: 120 },
-    { name: 'Portable Power Bank', cat: 'Electronics', sku: 'PWR', price: 35 },
-    { name: 'USB-C Hub', cat: 'Electronics', sku: 'HUB', price: 45 },
-    { name: 'Wireless Mouse', cat: 'Electronics', sku: 'MSE', price: 25 },
-    { name: 'Cotton T-Shirt', cat: 'Apparel', sku: 'TSH', price: 18 },
-    { name: 'School Hoodie', cat: 'Apparel', sku: 'HOD', price: 45 },
-    { name: 'Canvas Sneakers', cat: 'Apparel', sku: 'SNK', price: 55 },
-    { name: 'Insulated Lunch Box', cat: 'Lunchware', sku: 'LNB', price: 20 },
-    { name: 'Stainless Steel Water Bottle', cat: 'Lunchware', sku: 'WTR', price: 15 },
-    { name: 'Bento Box Set', cat: 'Lunchware', sku: 'BTO', price: 28 },
-    { name: 'Duffel Bag', cat: 'Backpacks', sku: 'DUF', price: 50 },
-    { name: 'Planner/Journal', cat: 'Stationery', sku: 'PLN', price: 22 },
-    { name: 'Desk Lamp', cat: 'Electronics', sku: 'LMP', price: 30 },
-    { name: 'E-Reader', cat: 'Electronics', sku: 'ERD', price: 99 },
-    { name: 'Correction Tape (5-Pack)', cat: 'Stationery', sku: 'COR', price: 10 },
-    { name: 'Sticky Note Mega-Bundle', cat: 'Stationery', sku: 'STK', price: 15 },
-    { name: 'Drawing Tablet', cat: 'Electronics', sku: 'TAB', price: 150 },
-    { name: 'Rain Jacket', cat: 'Apparel', sku: 'RNJ', price: 70 },
-    { name: 'School Uniform Blazer', cat: 'Apparel', sku: 'BLZ', price: 85 },
-    { name: 'Smart Watch', cat: 'Electronics', sku: 'WCH', price: 199 },
-    { name: 'Bluetooth Speaker', cat: 'Electronics', sku: 'SPK', price: 60 },
-    { name: 'Geometric Math Set', cat: 'Stationery', sku: 'GMS', price: 14 },
-    { name: 'Art Marker Set (48 Colors)', cat: 'Stationery', sku: 'MRK', price: 40 },
-    { name: 'Stapler & Remover Kit', cat: 'Stationery', sku: 'STP', price: 12 },
-    { name: 'Webcam 1080p', cat: 'Electronics', sku: 'CAM', price: 65 },
-    { name: 'Polo Shirt', cat: 'Apparel', sku: 'POL', price: 25 },
-    { name: 'School Chinos', cat: 'Apparel', sku: 'CHI', price: 40 },
+  // 3. Define the Digital Inventory
+  const products = [
+    // BitCompute (Compute)
+    { productID: 'GPU-H100-100H', name: '100 Hours H100 GPU Cluster', price: 250, cat: 'Cloud & Compute', vendor: infraVendor.id },
+    { productID: 'API-GPT4-50M', name: '50M Token Proxy Voucher', price: 99, cat: 'Cloud & Compute', vendor: infraVendor.id },
+    
+    // AssetStream (Creative)
+    { productID: 'UI-NEON-PRO', name: 'Neon-Cyber UI Kit (Figma)', price: 45, cat: 'Creative Assets', vendor: creativeVendor.id },
+    { productID: '3D-SCI-FI-PACK', name: 'Sci-Fi Modular Base (Unreal 5)', price: 120, cat: 'Creative Assets', vendor: creativeVendor.id },
+    { productID: 'AUD-CIN-LOOP', name: 'Cinematic Ambient Audio Bundle', price: 35, cat: 'Creative Assets', vendor: creativeVendor.id },
+    
+    // DevVault (Software/Edu)
+    { productID: 'JS-IDE-1YR', name: 'JetBrains All Products (1 Year)', price: 289, cat: 'Developer Tools', vendor: softwareVendor.id },
+    { productID: 'CO-PILOT-PRO', name: 'AI Coding Assistant Pro (Lifetime)', price: 499, cat: 'SaaS Subscriptions', vendor: softwareVendor.id },
+    { productID: 'AWS-CERT-VOUCH', name: 'AWS Solutions Architect Voucher', price: 150, cat: 'Education Vouchers', vendor: softwareVendor.id },
+    { productID: 'VERCEL-PRO-3MO', name: 'Vercel Pro (3 Month Credit)', price: 60, cat: 'SaaS Subscriptions', vendor: softwareVendor.id },
   ];
 
-  for (const template of productTemplates) {
-    const tieredItems = await generateTieredProducts(
-      template.name,
-      template.cat,
-      template.sku,
-      template.price
-    );
-
-    for (const item of tieredItems) {
-      await prisma.product.upsert({
-        where: { productID: item.productID },
-        update: {},
-        create: item,
-      });
-    }
+  for (const p of products) {
+    await prisma.product.upsert({
+      where: { productID: p.productID },
+      update: {},
+      create: {
+        productID: p.productID,
+        sku: p.productID,
+        name: p.name,
+        description: `Instant digital delivery for ${p.name}. License keys generated upon payment confirmation.`,
+        price: p.price,
+        vendorId: p.vendor,
+        categoryId: categoryMap[p.cat],
+        stockQuantity: 9999, // Infinite for digital
+        images: [`https://api.placeholder.com/400/300?text=${encodeURIComponent(p.name)}`],
+      },
+    });
   }
 
-  console.log("Seed completed: 3 Vendors, 5 Categories, and 102 Products created.");
+  console.log("Digital products seeded successfully.");
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().finally(async () => {
+  await prisma.$disconnect();
+  await pool.end();
+});
