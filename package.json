@@ -16,7 +16,8 @@
 		"@types/node": "^25.5.0",
 		"eslint": "^10.0.3",
 		"eslint-config-next": "^16.1.6",
-		"ts-node": "^10.9.2"
+		"ts-node": "^10.9.2",
+		"tsx": "^4.21.0"
 	},
 	"scripts": {
 		"postinstall": "prisma generate"

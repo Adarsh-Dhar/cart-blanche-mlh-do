@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 SKALE_RPC_URL = os.environ.get(
     "SKALE_RPC_URL",
-    "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
 )
 SKALE_CHAIN_ID = int(os.environ.get("SKALE_CHAIN_ID", "324705682"))
 
@@ -82,44 +81,52 @@ class X402SettlementTool:
                 )
 
         # ── 3. EIP-712 signature verification ────────────────────────────────
-        chain_id         = cart_mandate.get("chain_id", SKALE_CHAIN_ID)
-        primary_merchant = merchants[0]["merchant_address"]
-        total_amount     = (
-            cart_mandate.get("amount")
-            or cart_mandate.get("total_budget_amount")
-            or 0
-        )
+            chain_id         = cart_mandate.get("chain_id", SKALE_CHAIN_ID)
+            primary_merchant = merchants[0]["merchant_address"]
 
-        domain = {
-            "name":              "CartBlanche",
-            "version":           "1",
-            "chainId":           chain_id,
-            "verifyingContract": "0x0000000000000000000000000000000000000000",
-        }
-        eip712_message = {
-            "merchant_address": primary_merchant,
-            "amount":           total_amount,
-            "currency":         cart_mandate.get("currency", "USDC"),
-        }
-        eip712_types = {
-            "EIP712Domain": [
-                {"name": "name",              "type": "string"},
-                {"name": "version",           "type": "string"},
-                {"name": "chainId",           "type": "uint256"},
-                {"name": "verifyingContract", "type": "address"},
-            ],
-            "CartMandate": [
-                {"name": "merchant_address", "type": "address"},
-                {"name": "amount",           "type": "uint256"},
-                {"name": "currency",         "type": "string"},
-            ],
-        }
+            # Get the raw amount from the mandate
+            raw_total = (
+                cart_mandate.get("amount")
+                or cart_mandate.get("total_budget_amount")
+                or 0
+            )
 
-        signable_bytes = encode_typed_data(
-            domain_data=domain,
-            message_types={"CartMandate": eip712_types["CartMandate"]},
-            message_data=eip712_message,
-        )
+            # Convert to integer atomic units (USDC uses 6 decimals)
+            if isinstance(raw_total, float) or (isinstance(raw_total, (int, float)) and raw_total < 1000000):
+                total_amount_atomic = int(float(raw_total) * 1_000_000)
+            else:
+                total_amount_atomic = int(raw_total)
+
+            domain = {
+                "name":              "CartBlanche",
+                "version":           "1",
+                "chainId":           chain_id,
+                "verifyingContract": "0x0000000000000000000000000000000000000000",
+            }
+            eip712_message = {
+                "merchant_address": primary_merchant,
+                "amount":           total_amount_atomic,  # Pass integer atomic units
+                "currency":         cart_mandate.get("currency", "USDC"),
+            }
+            eip712_types = {
+                "EIP712Domain": [
+                    {"name": "name",              "type": "string"},
+                    {"name": "version",           "type": "string"},
+                    {"name": "chainId",           "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+                "CartMandate": [
+                    {"name": "merchant_address", "type": "address"},
+                    {"name": "amount",           "type": "uint256"},
+                    {"name": "currency",         "type": "string"},
+                ],
+            }
+
+            signable_bytes = encode_typed_data(
+                domain_data=domain,
+                message_types={"CartMandate": eip712_types["CartMandate"]},
+                message_data=eip712_message,
+            )
 
         w3 = Web3(Web3.HTTPProvider(SKALE_RPC_URL))
         if not w3.is_connected():
@@ -132,8 +139,18 @@ class X402SettlementTool:
         private_key = os.environ.get("SKALE_AGENT_PRIVATE_KEY")
         if not private_key:
             raise EnvironmentError("SKALE_AGENT_PRIVATE_KEY is not set.")
+
+        # 1. Strip all leading/trailing whitespace (handles newlines from .env)
+        private_key = private_key.strip()
+
+        # 2. Remove '0x' prefix if it exists (binascii/HexBytes hates the 'x')
         if private_key.startswith("0x"):
             private_key = private_key[2:]
+
+        # 3. Final validation: must be 64 characters long
+        if len(private_key) != 64:
+            logger.error("[X402] Private key is invalid length: %d (expected 64)", len(private_key))
+            # This might still crash, but at least you'll know why in the logs
 
         agent_account = w3.eth.account.from_key(private_key)
         current_nonce = w3.eth.get_transaction_count(agent_account.address)
@@ -149,12 +166,13 @@ class X402SettlementTool:
             raw_val = vendor.get("amount", 0)
             if isinstance(raw_val, str):
                 raw_val = raw_val.replace("$", "").replace(",", "")
-            raw_amount = float(raw_val)
-            # Convert USDC 6-decimal units to USD if needed
-            if raw_amount > 10_000:
-                raw_amount = raw_amount / 1_000_000.0
 
-            sfuel_value = max(raw_amount / 1_000_000.0, 0.0001)
+            val_as_float = float(raw_val)
+            # If already atomic units (>10k), convert to USD for sfuel math; else treat as USD
+            usd_amount = val_as_float / 1_000_000.0 if val_as_float > 10_000 else val_as_float
+
+            # Calculate sfuel (SKALE gas token)
+            sfuel_value = max(usd_amount / 1_000_000.0, 0.0001)
 
             tx = {
                 "nonce":    current_nonce,
@@ -175,7 +193,7 @@ class X402SettlementTool:
             w3.eth.wait_for_transaction_receipt(tx_hash_b, timeout=120)
             logger.info("[X402] ✅ Confirmed: %s", tx_hash)
 
-            item_usd   = Decimal(str(raw_amount))
+            item_usd   = Decimal(str(usd_amount))
             total_usd += item_usd
             current_nonce += 1
 

@@ -104,7 +104,12 @@ export function useMetaMask() {
       const fixedMessage: Record<string, unknown> = { ...payload.message };
 
       if (fixedMessage.amount !== undefined) {
+        // Always send USDC units as integer (bigint) to backend
         fixedMessage.amount = toUSDCUnits(Number(fixedMessage.amount));
+        // If you need to send to backend, convert to string
+        if (typeof fixedMessage.amount === 'bigint') {
+          fixedMessage.amount = fixedMessage.amount.toString();
+        }
       }
 
       if (typeof fixedMessage.merchant_address === 'string') {

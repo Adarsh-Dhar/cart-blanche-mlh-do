@@ -28,7 +28,7 @@ async function main() {
     create: {
       name: "ValueGear Essentials",
       description: "Affordable school and office supplies for everyday needs.",
-      pubkey: '0xBudgetVendorAddress712...',
+      pubkey: '0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9',
       logoUrl: "https://api.placeholder.com/150/budget",
     },
   });
@@ -39,7 +39,7 @@ async function main() {
     create: {
       name: "Scholar's Choice",
       description: "Quality brands and durable gear for serious students.",
-      pubkey: '0xMidRangeVendorAddress712...',
+      pubkey: '0x90C768dDfeA2352511FeEE464BED8b550994d3eB',
       logoUrl: "https://api.placeholder.com/150/scholar",
     },
   });
@@ -50,7 +50,7 @@ async function main() {
     create: {
       name: "Elite Academy Boutique",
       description: "High-end stationery, designer tech, and premium apparel.",
-      pubkey: '0xPremiumVendorAddress712...',
+      pubkey: '0xAE0F008660E94CB67203C2Eac3660C4e0Aff6948',
       logoUrl: "https://api.placeholder.com/150/elite",
     },
   });
