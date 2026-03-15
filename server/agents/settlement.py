@@ -44,16 +44,17 @@ async def _save_agent_response(state: AgentState, rtype: str, text: str) -> None
 
 
 async def _has_active_session(chat_id: str | None) -> bool:
-    """Return True if there is a non-expired SmartWallet record for this chat."""
+    """Return True if there is a non-expired SmartWallet record."""
     try:
         import datetime
         db = await get_db()
 
-        where_clause: dict = {"expiresAt": {"gt": datetime.datetime.utcnow()}}
-        if chat_id:
-            where_clause["chatId"] = chat_id
-
-        record = await db.smartwallet.find_first(where=where_clause)
+        # Look for any valid session key, ignoring chat_id scoping
+        record = await db.smartwallet.find_first(
+            where={
+                "expiresAt": {"gt": datetime.datetime.utcnow()}
+            }
+        )
         return record is not None
     except Exception as exc:
         logger.warning("[Settlement] Could not check session key: %s", exc)

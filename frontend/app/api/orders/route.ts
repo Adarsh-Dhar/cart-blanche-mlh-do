@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (products.length !== productIds.length) {
-      const foundIds = new Set(products.map((p) => p.id));
+      const foundIds = new Set(products.map((p: { id: any; }) => p.id));
       const missing = productIds.filter((id) => !foundIds.has(id));
       return NextResponse.json(
         { error: `Products not found: ${missing.join(", ")}` },
@@ -89,10 +89,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const productMap = new Map(products.map((p) => [p.id, p]));
+    const productMap = new Map(products.map((p: { id: any; }) => [p.id, p]));
     for (const item of items) {
       const product = productMap.get(item.productId)!;
-      if (product.stockQuantity < item.quantity) {
+      if (product < item.quantity) {
         return NextResponse.json(
           { error: `Insufficient stock for product "${product.name}". Available: ${product.stockQuantity}` },
           { status: 409 }
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       totalAmount = totalAmount.add(product.price.mul(item.quantity));
     }
 
-    const order = await prisma.$transaction(async (tx) => {
+    const order = await prisma.$transaction(async (tx: { order: { create: (arg0: { data: any; include: { items: { include: { product: { select: { id: boolean; name: boolean; sku: boolean; }; }; vendor: { select: { id: boolean; name: boolean; }; }; }; }; }; }) => any; }; product: { update: (arg0: { where: { id: any; }; data: { stockQuantity: { decrement: any; }; }; }) => any; }; }) => {
       const newOrder = await tx.order.create({
         data: {
           totalAmount,

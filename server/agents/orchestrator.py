@@ -318,8 +318,14 @@ async def orchestrator_node(state: AgentState) -> dict:
         }
 
     query_lower = query.lower().strip()
-    if query_lower in _AFFIRMATION_KEYWORDS or \
-       any(k in query_lower for k in _AFFIRMATION_KEYWORDS):
+
+    # Use regex word boundaries (\b) to prevent matching "ok" inside "token"
+    is_affirmation = any(
+        re.search(rf'\b{re.escape(k)}\b', query_lower) 
+        for k in _AFFIRMATION_KEYWORDS
+    )
+
+    if query_lower in _AFFIRMATION_KEYWORDS or is_affirmation:
         return {"_orchestrated": True, "_shopped": False}
 
     # ── Step 1: Keyword fast-path (always run — O(n) cost, never fails) ───────
