@@ -1,57 +1,46 @@
 "use client";
 
+/**
+ * components/header.tsx — Cart Blanche top navigation with Google OAuth
+ */
+
 import Link from "next/link";
-import { useMetaMask } from "@/hooks/use-metamask"; // Note: Ensure you are using the correct hook (useX402 if you migrated it!)
-
-import { Inter } from 'next/font/google';
-
-const inter = Inter({ subsets: ['latin'] });
+import { useSession, signIn, signOut } from "next-auth/react";
+import { useMetaMask } from "@/hooks/use-metamask";
+import { useState, useRef, useEffect } from "react";
+import { LogOut, User, ChevronDown, Loader2 } from "lucide-react";
 
 export default function Header() {
   const { connect, address } = useMetaMask();
+  const { data: session, status } = useSession();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const handleConnect = async () => {
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleConnectWallet = async () => {
     try {
-      // Check if window.ethereum is available
-      if (typeof window !== 'undefined' && window.ethereum) {
-        const requiredChainId = '0x135A9D92'; // 324705682 in hex (SKALE Base Sepolia)
-        // Always attempt to switch to the required chain before connecting
+      if (typeof window !== "undefined" && window.ethereum) {
+        const requiredChainId = "0x135A9D92";
         try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: requiredChainId }],
-          });
+          await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: requiredChainId }] });
         } catch (switchError: any) {
-          // If the chain has not been added to MetaMask, try to add it (Error code 4902)
           if (switchError.code === 4902) {
-            try {
-              await window.ethereum.request({
-                method: 'wallet_addEthereumChain',
-                params: [
-                  {
-                    chainId: requiredChainId,
-                    chainName: 'SKALE Base Sepolia Testnet',
-                    rpcUrls: ['https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha/'],
-                    nativeCurrency: {
-                      name: 'SKALE Credits',
-                      symbol: 'CREDIT',
-                      decimals: 18,
-                    },
-                    blockExplorerUrls: ['https://base-sepolia-testnet-explorer.skalenodes.com'],
-                  },
-                ],
-              });
-            } catch (addError) {
-              console.error('Failed to add SKALE chain:', addError);
-              return;
-            }
-          } else {
-            console.error('Failed to switch chain:', switchError);
-            return;
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [{ chainId: requiredChainId, chainName: "SKALE Base Sepolia Testnet", rpcUrls: ["https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha/"], nativeCurrency: { name: "SKALE Credits", symbol: "CREDIT", decimals: 18 }, blockExplorerUrls: ["https://base-sepolia-testnet-explorer.skalenodes.com"] }],
+            });
           }
         }
       }
-      // Now request account connection
       await connect();
     } catch (error) {
       console.error("Failed to connect wallet:", error);
@@ -61,33 +50,101 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4 mx-auto">
+        {/* Brand */}
         <Link href="/" className="flex items-center space-x-2">
-          {/* Cart icon left of logo text */}
           <img
             src="/Gemini_Generated_Image_arlivbarlivbarli-removebg-preview.png"
             alt="Cart Logo"
             className="h-8 w-8 object-contain drop-shadow-[0_0_6px_#ffe95c80]"
-            style={{ maxHeight: '2rem' }}
+            style={{ maxHeight: "2rem" }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
-          <span className="font-bold text-lg text-[#ffe95c] drop-shadow-[0_0_6px_#ffe95c80] tracking-wide">
-            Cart Blanche
-          </span>
+          <span className="font-bold text-lg text-[#ffe95c] drop-shadow-[0_0_6px_#ffe95c80] tracking-wide">Cart Blanche</span>
         </Link>
-        <div className="flex items-center gap-4">
+
+        {/* Right side */}
+        <div className="flex items-center gap-3">
+
+          {/* MetaMask wallet chip */}
           {address ? (
-            <div className="rounded-full bg-[#ffe95c1a] px-4 py-2 text-sm text-[#ffe95c] border border-[#ffe95c40] font-mono tracking-tight shadow-[0_0_8px_#ffe95c40]">
-              {address.slice(0, 6)}...{address.slice(-4)}
+            <div style={{ borderRadius: 9999, background: "rgba(255,233,92,0.1)", padding: "6px 14px", fontSize: 13, color: "#ffe95c", border: "1px solid rgba(255,233,92,0.25)", fontFamily: "monospace", boxShadow: "0 0 8px rgba(255,233,92,0.25)" }}>
+              {address.slice(0, 6)}…{address.slice(-4)}
             </div>
           ) : (
             <button
-              onClick={handleConnect}
-              className="rounded-full bg-[#ffe95c] px-4 py-2 text-sm font-semibold text-black hover:bg-[#fff7b2] transition-all shadow-[0_0_12px_#ffe95c80] border border-[#ffe95c40]"
+              onClick={handleConnectWallet}
+              style={{ borderRadius: 9999, background: "#ffe95c", padding: "6px 16px", fontSize: 13, fontWeight: 600, color: "#000", border: "1px solid rgba(255,233,92,0.4)", cursor: "pointer", boxShadow: "0 0 12px rgba(255,233,92,0.5)", transition: "all 0.2s" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#fff7b2"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "#ffe95c"; }}
             >
               Connect MetaMask
             </button>
           )}
+
+          {/* Auth */}
+          {status === "loading" ? (
+            <Loader2 size={16} color="#4a5568" style={{ animation: "spin 1s linear infinite" }} />
+          ) : session ? (
+            /* Signed-in dropdown */
+            <div ref={dropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setDropdownOpen(o => !o)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 12px 5px 6px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 9999, cursor: "pointer", color: "#e2e8f0", transition: "all 0.15s" }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.05)"; }}
+              >
+                {session.user?.image ? (
+                  <img src={session.user.image} alt="avatar" style={{ width: 26, height: 26, borderRadius: "50%", objectFit: "cover", border: "1px solid rgba(255,255,255,0.2)" }} />
+                ) : (
+                  <div style={{ width: 26, height: 26, borderRadius: "50%", background: "hsl(66,100%,50%,0.2)", border: "1px solid hsl(66,100%,50%,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <User size={13} color="hsl(66,100%,50%)" />
+                  </div>
+                )}
+                <span style={{ fontSize: 13, fontWeight: 500, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {session.user?.name?.split(" ")[0] ?? "Account"}
+                </span>
+                <ChevronDown size={13} color="#4a5568" style={{ transform: dropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+              </button>
+
+              {dropdownOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#0d1117", border: "1px solid #1a2332", borderRadius: 12, padding: 8, minWidth: 200, boxShadow: "0 16px 40px rgba(0,0,0,0.5)", zIndex: 100 }}>
+                  <div style={{ padding: "10px 12px", borderBottom: "1px solid #1a2332", marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 2 }}>{session.user?.name}</div>
+                    <div style={{ fontSize: 11, color: "#4a5568", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.user?.email}</div>
+                  </div>
+                  {[{ label: "Chat", href: "/chat" }, { label: "Wallet", href: "/wallet" }, { label: "Settings", href: "/settings" }].map(({ label, href }) => (
+                    <Link key={href} href={href} onClick={() => setDropdownOpen(false)}
+                      style={{ display: "block", padding: "8px 12px", borderRadius: 8, fontSize: 13, color: "#94a3b8", textDecoration: "none", transition: "all 0.1s" }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = "#1a2332"; (e.currentTarget as HTMLAnchorElement).style.color = "#e2e8f0"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; (e.currentTarget as HTMLAnchorElement).style.color = "#94a3b8"; }}
+                    >{label}</Link>
+                  ))}
+                  <div style={{ height: 1, background: "#1a2332", margin: "6px 0" }} />
+                  <button
+                    onClick={() => { setDropdownOpen(false); signOut({ callbackUrl: "/" }); }}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "transparent", border: "none", borderRadius: 8, fontSize: 13, color: "#ef4444", cursor: "pointer", textAlign: "left", fontFamily: "inherit", transition: "all 0.1s" }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#ef444415"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  >
+                    <LogOut size={13} /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Not signed in */
+            <button
+              onClick={() => signIn("google", { callbackUrl: "/chat" })}
+              style={{ padding: "7px 18px", background: "hsl(66,100%,50%,0.1)", border: "1px solid hsl(66,100%,50%,0.3)", borderRadius: 9999, fontSize: 13, fontWeight: 600, color: "hsl(66,100%,50%)", cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "hsl(66,100%,50%,0.2)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "hsl(66,100%,50%,0.1)"; }}
+            >
+              Sign in
+            </button>
+          )}
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </header>
   );
 }
