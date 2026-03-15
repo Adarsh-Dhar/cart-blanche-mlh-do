@@ -1,13 +1,5 @@
 """
 main.py — Cart-Blanche API Server (Smart Wallet + Session Key edition)
-=======================================================================
-Changes from the old flow:
-  - Mounts /api/wallet/* routes (wallet_routes.py) for session-key management
-  - Passes chat_id into the graph state so settlement_node can look up
-    the SmartWallet record autonomously
-  - Removes the MetaMask signature parsing / SIGNATURE classification;
-    settlement is now triggered by "Looks good" → merchant_node → settlement_node
-    without any user signature
 """
 
 from __future__ import annotations
@@ -49,21 +41,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount Smart Wallet routes under /api
 app.include_router(wallet_router, prefix="/api")
 
 _graph = build_graph()
 logger.info("[Cart-Blanche] LangGraph compiled — 5 agents ready (Smart Wallet mode).")
 
-# ── session_id → Prisma Chat.id ───────────────────────────────────────────────
+# session_id → Prisma Chat.id
 _session_chat: dict[str, str] = {}
 
 
 async def _ensure_chat(session_id: str) -> str:
+    """Get or create a Prisma Chat record for this session."""
     if session_id in _session_chat:
         return _session_chat[session_id]
     db = await get_db()
-    chat = await db.chat.create(data={})
+    # Prisma Python uses lowercase model names
+    # Try to find an existing chat with this id first (frontend may have created it)
+    try:
+        existing = await db.chat.find_unique(where={"id": session_id})
+        if existing:
+            _session_chat[session_id] = existing.id
+            return existing.id
+    except Exception:
+        pass
+    # Create new
+    chat = await db.chat.create(data={"id": session_id})
     _session_chat[session_id] = chat.id
     logger.info("[DB] Chat %s created for session %s", chat.id, session_id)
     return chat.id
@@ -122,26 +124,24 @@ async def run_sse(payload: Any = Body(None)):
             yield "data: [DONE]\n\n"
             return
 
-        # ── Classify request type ─────────────────────────────────────────────
         lower = user_text.lower().strip()
         if any(k in lower for k in ("looks good", "confirm", "proceed", "yes", "ok")):
             request_type = "AFFIRMATION"
         else:
-            # NOTE: SIGNATURE type removed — no manual signatures in the new flow
             request_type = "DISCOVERY"
+
+        chat_id         = None
+        user_request_id = None
 
         try:
             chat_id         = await _ensure_chat(session_id)
             user_request_id = await _save_user_request(chat_id, user_text, request_type)
         except Exception as exc:
             logger.warning("[DB] Could not persist UserRequest: %s", exc)
-            chat_id         = None
-            user_request_id = None
 
         try:
             config = {"configurable": {"thread_id": session_id}}
 
-            # Pass chat_id so settlement_node can find the SmartWallet record
             init_state: dict = {
                 "messages":        [("user", user_text)],
                 "chat_id":         chat_id,
@@ -161,7 +161,8 @@ async def run_sse(payload: Any = Body(None)):
                 if not text:
                     continue
 
-                yield _sse({"text": text})
+                agent_name = getattr(last, "name", None) or "Agent"
+                yield _sse({"text": text, "agent": agent_name})
 
             yield "data: [DONE]\n\n"
 
@@ -176,11 +177,11 @@ async def run_sse(payload: Any = Body(None)):
 @app.get("/health")
 async def health():
     return {
-        "status":       "ok",
-        "agents":       ["orchestrator", "shopping", "merchant", "vault", "settlement"],
-        "llm":          os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
-        "db":           "prisma/postgresql",
-        "wallet_flow":  "ERC-4337 Smart Wallet + Session Key (no manual signatures)",
+        "status":      "ok",
+        "agents":      ["orchestrator", "shopping", "merchant", "vault", "settlement"],
+        "llm":         os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+        "db":          "prisma/postgresql",
+        "wallet_flow": "ERC-4337 Smart Wallet + Session Key (no manual signatures)",
     }
 
 

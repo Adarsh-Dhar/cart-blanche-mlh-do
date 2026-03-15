@@ -12,7 +12,7 @@ import atexit
 import asyncio
 import logging
 
-from prisma import Prisma
+from sdk.python.src.prisma.client import Prisma
 
 logger = logging.getLogger(__name__)
 

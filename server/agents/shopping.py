@@ -231,12 +231,30 @@ async def shopping_node(state: AgentState) -> dict:
                 print(f"    -> no results for '{term}'")
 
     if not term_slots:
-        return {
-            "product_list": [], "_shopped": True, "steps": steps + 1,
-            "messages": [AIMessage(
-                content="No in-stock products found for your request.", name="ShoppingAgent",
-            )],
-        }
+        # Fallback: search catalog for partial matches
+        db = await get_db()
+        products = await db.product.find_many()
+        plan_terms = [t.strip() for t in plan.split(';') if t.strip()]
+        matched = []
+        for p in products:
+            for term in plan_terms:
+                if term.lower() in p["name"].lower() or term.lower() in p["description"].lower():
+                    matched.append(p)
+                    break
+        if matched:
+            return {
+                "product_list": matched, "_shopped": True, "steps": steps + 1,
+                "messages": [AIMessage(
+                    content=f"Fallback: Found {len(matched)} similar products for your request.", name="ShoppingAgent",
+                )],
+            }
+        else:
+            return {
+                "product_list": [], "_shopped": True, "steps": steps + 1,
+                "messages": [AIMessage(
+                    content="No in-stock or similar products found for your request.", name="ShoppingAgent",
+                )],
+            }
 
     # ── Phase 2: initial selection — one item per term slot ───────────────────
     selected:     list[dict] = []
