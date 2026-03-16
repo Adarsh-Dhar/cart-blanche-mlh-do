@@ -1,7 +1,7 @@
 /**
  * hooks/useBurnerWallet.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Delegated Burner EOA Architecture
+ * Fixed version with confirmed transfers.
  */
 
 "use client";
@@ -9,6 +9,8 @@
 import { useState, useCallback } from "react";
 import {
   createWalletClient,
+  createPublicClient, // Added
+  http,               // Added
   custom,
   encodeFunctionData,
   parseUnits,
@@ -27,21 +29,15 @@ export const skaleBaseSepolia = {
   nativeCurrency: { name: "SKALE Credits", symbol: "CREDIT", decimals: 18 },
   rpcUrls: {
     default: {
-      http: [
-        "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
-      ],
+      http: ["https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha"],
     },
   },
   blockExplorers: {
-    default: {
-      name: "SKALE Explorer",
-      url: "https://base-sepolia-testnet-explorer.skalenodes.com",
-    },
+    default: { name: "SKALE Explorer", url: "https://base-sepolia-testnet-explorer.skalenodes.com" },
   },
 } as const;
 
-const USDC_CONTRACT_ADDRESS =
-  "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" as Address;
+const USDC_CONTRACT_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" as Address;
 
 const USDC_ABI = [
   {
@@ -62,15 +58,8 @@ export interface BurnerWalletInfo {
   expiresAt: Date;
 }
 
-export type BurnerWalletStatus =
-  | "idle"
-  | "generating"
-  | "funding"
-  | "saving"
-  | "ready"
-  | "error";
+export type BurnerWalletStatus = "idle" | "generating" | "funding" | "saving" | "ready" | "error";
 
-// ── XOR encryption ────────────────────────────────────────────────────────────
 function encryptPrivateKey(privateKey: string, ownerAddress: string): string {
   const keyHex = keccak256(toBytes(ownerAddress.toLowerCase()));
   const pkBytes = toBytes(privateKey as `0x${string}`);
@@ -79,7 +68,6 @@ function encryptPrivateKey(privateKey: string, ownerAddress: string): string {
   return toHex(new Uint8Array(encrypted));
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
 export function useBurnerWallet() {
   const [status, setStatus] = useState<BurnerWalletStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -100,48 +88,49 @@ export function useBurnerWallet() {
       setError(null);
 
       try {
+        // 1. Generate Burner
         setStatus("generating");
-
         const burnerPrivateKey = generatePrivateKey();
         const burnerAccount = privateKeyToAccount(burnerPrivateKey);
         const burnerAddress = burnerAccount.address;
 
-        console.log("[BurnerWallet] Generated burner address:", burnerAddress);
-
+        // 2. Fund Burner (Wait for On-chain Confirmation)
         setStatus("funding");
-
+        
         const walletClient = createWalletClient({
           chain: skaleBaseSepolia,
           transport: custom(window.ethereum),
         });
 
+        const publicClient = createPublicClient({
+          chain: skaleBaseSepolia,
+          transport: http(),
+        });
+
         const [ownerEoa] = await walletClient.requestAddresses();
 
-        const fundCalldata = encodeFunctionData({
-          abi: USDC_ABI,
-          functionName: "transfer",
-          args: [burnerAddress, parseUnits(fundAmountUsdc.toString(), 6)],
-        });
-
-        console.log(`[BurnerWallet] Funding burner with $${fundAmountUsdc} USDC from ${ownerEoa}...`);
-
-        const txHash = await walletClient.sendTransaction({
+        console.log(`[BurnerWallet] Sending $${fundAmountUsdc} USDC transfer...`);
+        
+        const hash = await walletClient.sendTransaction({
           account: ownerEoa,
           to: USDC_CONTRACT_ADDRESS,
-          data: fundCalldata,
-          chain: skaleBaseSepolia,
+          data: encodeFunctionData({
+            abi: USDC_ABI,
+            functionName: "transfer",
+            args: [burnerAddress, parseUnits(fundAmountUsdc.toString(), 6)],
+          }),
         });
 
-        console.log("[BurnerWallet] Fund tx hash:", txHash);
+        // CRITICAL: Stop and wait for the blockchain to actually move the money
+        console.log("[BurnerWallet] Waiting for confirmation:", hash);
+        await publicClient.waitForTransactionReceipt({ hash });
+        console.log("[BurnerWallet] Transfer Confirmed.");
 
+        // 3. Save to Backend
         setStatus("saving");
-
         const expiresAt = new Date(Date.now() + sessionDurationHours * 60 * 60 * 1000);
-        
-        // Encrypting the RAW private key string using the EOA as the XOR key
         const encryptedKey = encryptPrivateKey(burnerPrivateKey, ownerEoa);
 
-        // Using the EXACT schema names your backend route expects
         const payload = {
           smartWalletAddress: burnerAddress,
           sessionKeyPublic: burnerAddress,
@@ -157,22 +146,11 @@ export function useBurnerWallet() {
           body: JSON.stringify(payload),
         });
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "Failed to save burner wallet to backend");
-        }
+        if (!res.ok) throw new Error("Failed to save burner wallet to backend");
 
-        const info: BurnerWalletInfo = {
-          burnerAddress,
-          ownerEoa,
-          fundedAmount: fundAmountUsdc,
-          expiresAt,
-        };
-
+        const info: BurnerWalletInfo = { burnerAddress, ownerEoa, fundedAmount: fundAmountUsdc, expiresAt };
         setWalletInfo(info);
         setStatus("ready");
-
-        console.log("[BurnerWallet] Setup complete. Agent authorized.");
         return info;
       } catch (err: any) {
         console.error("[BurnerWallet] Error:", err);
@@ -184,38 +162,24 @@ export function useBurnerWallet() {
     []
   );
 
-  const checkExistingSession = useCallback(
-    async (): Promise<BurnerWalletInfo | null> => {
-      try {
-        const res = await fetch("/api/wallet/session-key");
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (!data.data) return null;
+  const checkExistingSession = useCallback(async (): Promise<BurnerWalletInfo | null> => {
+    try {
+      const res = await fetch("/api/wallet/session-key");
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.data) return null;
+      const expiresAt = new Date(data.data.expiresAt);
+      if (expiresAt < new Date()) return null;
+      const info: BurnerWalletInfo = {
+        burnerAddress: data.data.smartWalletAddress as Address,
+        ownerEoa: data.data.ownerEoa as Address,
+        fundedAmount: parseFloat(data.data.spendLimitUsdc),
+        expiresAt,
+      };
+      setWalletInfo(info);
+      return info;
+    } catch { return null; }
+  }, []);
 
-        const expiresAt = new Date(data.data.expiresAt);
-        if (expiresAt < new Date()) return null;
-
-        const info: BurnerWalletInfo = {
-          burnerAddress: data.data.smartWalletAddress as Address,
-          ownerEoa: data.data.ownerEoa as Address,
-          fundedAmount: parseFloat(data.data.spendLimitUsdc),
-          expiresAt,
-        };
-
-        setWalletInfo(info);
-        return info;
-      } catch {
-        return null;
-      }
-    },
-    []
-  );
-
-  return {
-    status,
-    error,
-    walletInfo,
-    authorizeShoppingAgent,
-    checkExistingSession,
-  };
+  return { status, error, walletInfo, authorizeShoppingAgent, checkExistingSession };
 }

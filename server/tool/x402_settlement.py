@@ -19,14 +19,14 @@ HOW:
   5. Broadcast via eth_sendRawTransaction with gasPrice=0 (SKALE is gasless)
 """
 
-from __future__ import annotations
-import json
+
+from web3 import Web3, Account
+from ..db import get_db
 import logging
 import os
+import json
 from decimal import Decimal
 from typing import Any
-
-from ..db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,40 @@ USDC_CONTRACT = os.environ.get(
 )
 
 DEFAULT_SPEND_LIMIT = float(os.environ.get("DEFAULT_SPEND_LIMIT_USD", "10000"))
+
+
+def drip_sfuel_to_burner(burner_address: str):
+    """
+    Uses the Master Wallet (with sFUEL credits) to fund a new burner.
+    """
+    master_key = os.getenv("MASTER_PRIVATE_KEY")
+    if not master_key:
+        logger.warning("[X402] No MASTER_PRIVATE_KEY found. Skipping gas drip.")
+        return
+
+    try:
+        w3 = Web3(Web3.HTTPProvider(SKALE_RPC_URL))
+        master_account = Account.from_key(master_key)
+
+        # Check if burner already has sFUEL
+        balance = w3.eth.get_balance(burner_address)
+        if balance > Web3.to_wei(0.0005, 'ether'):
+            return
+
+        tx = {
+            'nonce': w3.eth.get_transaction_count(master_account.address),
+            'to': burner_address,
+            'value': Web3.to_wei(0.001, 'ether'), # 0.001 sFUEL is plenty
+            'gas': 21000,
+            'gasPrice': 0, # Standard for SKALE
+            'chainId': SKALE_CHAIN_ID
+        }
+
+        signed = w3.eth.account.sign_transaction(tx, master_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+        logger.info(f"[X402] Drip successful: {tx_hash.hex()}")
+    except Exception as e:
+        logger.error(f"[X402] Gas drip failed: {e}")
 
 
 def _decrypt_burner_key(encrypted_hex: str, owner_address: str) -> str:
@@ -169,6 +203,9 @@ class X402SettlementTool:
         logger.info(
             "[X402] Burner account recovered: %s", burner_account.address[:12]
         )
+
+        logger.info("[X402] Checking burner gas balance...")
+        drip_sfuel_to_burner(burner_account.address)
 
         # ── Connect to SKALE RPC ───────────────────────────────────────────────
         w3 = Web3(
