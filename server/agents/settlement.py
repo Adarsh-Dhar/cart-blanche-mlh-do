@@ -1,7 +1,13 @@
 """
 agents/settlement.py — Settlement Agent
-Emits structured receipt JSON so the frontend renders the ReceiptCard.
-No raw prose JSON — only the clean settled payload.
+
+KEY FIX: Always emits structured JSON (never prose text).
+This ensures the frontend's pickBestChunk returns receipt(4) > cart_mandate(3),
+so the ReceiptCard always replaces the MandateCard — even on failure.
+
+Previously, errors were emitted as prose text (priority 0), which was
+permanently hidden behind the mandate card (priority 3), leaving the UI
+stuck on "Processing via SKALE network..." forever.
 """
 from __future__ import annotations
 import json
@@ -40,35 +46,63 @@ async def _has_active_session(chat_id: str | None) -> bool:
         return False
 
 
+def _failure_json(error_msg: str, mandate: dict | None = None) -> str:
+    """
+    Build a structured failure payload that classifyContent recognises as "receipt"
+    so the ReceiptCard (priority 4) replaces the MandateCard (priority 3).
+    """
+    vendors = (mandate or {}).get("merchants", [])
+    failures = [
+        {
+            "commodity":  v.get("name", "Unknown Vendor"),
+            "amount_usd": float(v.get("amount", 0)),
+            "error":      error_msg,
+        }
+        for v in vendors
+    ] if vendors else [
+        {"commodity": "Settlement", "amount_usd": 0.0, "error": error_msg}
+    ]
+    return json.dumps({
+        "status":   "failed",
+        "receipts": [],
+        "failures": failures,
+        "network":  "SKALE Base Sepolia",
+        "details":  error_msg,
+    })
+
+
 async def settlement_node(state: AgentState) -> dict:
     steps   = state.get("steps", 0)
     mandate = state.get("cart_mandate")
     chat_id = state.get("chat_id")
 
+    # ── No mandate ─────────────────────────────────────────────────────────────
     if not mandate:
+        payload = _failure_json("No active cart mandate. Please start a new shopping request.")
+        await _save_agent_response(state, "RECEIPT", payload)
         return {
             "steps": steps + 1,
-            "messages": [AIMessage(
-                content="No active cart mandate. Please start a new request.",
-                name="PaymentProcessor",
-            )],
+            "messages": [AIMessage(content=payload, name="PaymentProcessor")],
         }
 
+    # ── No session key ─────────────────────────────────────────────────────────
     has_session = await _has_active_session(chat_id)
-
     if not has_session:
-        msg = (
-            "**Smart Wallet not set up yet.**\n\n"
-            "Visit the [Wallet page](/wallet) to deposit USDC and authorize the agent. "
-            "Once done, payments settle automatically."
+        error_msg = (
+            "Smart Wallet not set up. "
+            "Visit /wallet to deposit USDC and authorize the agent, then try again."
         )
+        payload = _failure_json(error_msg, mandate)
+        await _save_agent_response(state, "RECEIPT", payload)
+        logger.info("[Settlement] No active session key for chat %s", chat_id)
         return {
             "steps": steps + 1,
-            "messages": [AIMessage(content=msg, name="PaymentProcessor")],
+            "messages": [AIMessage(content=payload, name="PaymentProcessor")],
         }
 
     logger.info("[Settlement] Settling autonomously for chat %s…", chat_id)
 
+    # ── Run settlement ──────────────────────────────────────────────────────────
     try:
         result = await _settlement_tool.run_async(
             args={
@@ -83,37 +117,24 @@ async def settlement_node(state: AgentState) -> dict:
     except Exception as exc:
         logger.exception("[Settlement] Error during settlement")
         error_msg = str(exc)
-        # Give actionable guidance for spend limit errors
+        # Spend limit exceeded — add actionable hint
         if "spend limit" in error_msg.lower():
-            return {
-                "steps": steps + 1,
-                "messages": [AIMessage(
-                    content=(
-                        f"**Payment blocked:** {error_msg}\n\n"
-                        "→ Visit the [Wallet page](/wallet) and set a higher spend limit, then try again."
-                    ),
-                    name="PaymentProcessor",
-                )],
-            }
+            error_msg = f"{error_msg} → Visit /wallet and increase your spend limit, then try again."
+        payload = _failure_json(error_msg, mandate)
+        await _save_agent_response(state, "RECEIPT", payload)
         return {
             "steps": steps + 1,
-            "messages": [AIMessage(
-                content=f"**Payment error:** {error_msg}",
-                name="PaymentProcessor",
-            )],
+            "messages": [AIMessage(content=payload, name="PaymentProcessor")],
         }
 
-    receipts  = result.get("receipts", [])
-    total_usd = sum(r.get("amount_usd", 0) for r in receipts)
-
+    # ── Emit structured receipt (settled or partial) ───────────────────────────
+    receipts = result.get("receipts", [])
     await _save_agent_response(state, "RECEIPT", json.dumps(result))
 
-    # Emit ONLY the structured receipt payload.
-    # The frontend's classifyContent detects "status":"settled" and renders ReceiptCard.
-    # Zero prose — clean card only.
     receipt_json = json.dumps({
-        "status":   "settled",
+        "status":   result.get("status", "settled"),
         "receipts": receipts,
+        "failures": result.get("failures", []),
         "network":  result.get("network", "SKALE"),
         "details":  result.get("details", ""),
     })

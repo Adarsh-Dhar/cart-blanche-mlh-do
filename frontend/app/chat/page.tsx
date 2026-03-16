@@ -45,7 +45,8 @@ function classifyContent(content: string): ContentKind {
   if (p.type === "product_list" && Array.isArray(p.products)) return "product_list";
   if (p.type === "cart_mandate" || (p.merchants && p.amount)) return "cart_mandate";
   if (p.type === "PLAN" && p.plan) return "plan";
-  if (p.status === "settled" && p.receipts) return "receipt";
+  // "settled", "partial", "failed" — all settlement outcomes render as ReceiptCard
+  if ((p.status === "settled" || p.status === "partial" || p.status === "failed") && Array.isArray(p.receipts)) return "receipt";
   return "text";
 }
 
@@ -208,20 +209,24 @@ function MandateCard({ data }: { data: any }) {
 function ReceiptCard({ data }: { data: any }) {
   const receipts = data.receipts || [];
   const failures = data.failures || [];
-  const isPartial = data.status === "partial";
+  const isFailed  = data.status === "failed" || (receipts.length === 0 && failures.length > 0);
+  const isPartial = data.status === "partial" && receipts.length > 0;
+  const isOk      = !isFailed && !isPartial;
   const total = receipts.reduce((s: number, r: any) => s + (r.amount_usd || 0), 0);
   const [checked, setChecked] = useState(false);
   useEffect(() => { const t = setTimeout(() => setChecked(true), 300); return () => clearTimeout(t); }, []);
 
-  const headerColor   = isPartial ? "#f59e0b" : "#22d3ee";
-  const headerBg      = isPartial ? "#1c1406" : "#001418";
-  const headerBorder  = isPartial ? "#f59e0b30" : "#22d3ee30";
-  const headerGlow    = isPartial ? "#f59e0b15" : "#22d3ee15";
-  const headerLabel   = receipts.length === 0
-    ? "All Payments Failed"
-    : isPartial
-      ? `${receipts.length} of ${receipts.length + failures.length} Payments Confirmed`
-      : "Payment Confirmed";
+  const headerColor   = isFailed ? "#ef4444" : isPartial ? "#f59e0b" : "#22d3ee";
+  const headerBg      = isFailed ? "#1a0000" : isPartial ? "#1c1406" : "#001418";
+  const headerBorder  = isFailed ? "#ef444430" : isPartial ? "#f59e0b30" : "#22d3ee30";
+  const headerGlow    = isFailed ? "#ef444415" : isPartial ? "#f59e0b15" : "#22d3ee15";
+  const headerLabel   = isFailed
+    ? "Payment Failed"
+    : receipts.length === 0
+      ? "All Payments Failed"
+      : isPartial
+        ? `${receipts.length} of ${receipts.length + failures.length} Payments Confirmed`
+        : "Payment Confirmed";
 
   return (
     <div style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${headerBorder}`, background: `linear-gradient(135deg,#00090d,${headerBg})`, boxShadow: `0 0 60px ${headerGlow}` }}>
@@ -232,8 +237,8 @@ function ReceiptCard({ data }: { data: any }) {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: headerColor }}>{headerLabel}</div>
-          <div style={{ fontSize: 11, color: "#0e7490", marginTop: 2 }}>
-            {receipts.length > 0 ? `${receipts.length} transaction${receipts.length !== 1 ? "s" : ""} settled on SKALE` : "No transactions confirmed"}
+          <div style={{ fontSize: 11, color: isFailed ? "#ef4444" : "#0e7490", marginTop: 2 }}>
+            {isFailed ? "Check your Smart Wallet setup at /wallet" : receipts.length > 0 ? `${receipts.length} transaction${receipts.length !== 1 ? "s" : ""} settled on SKALE` : "No transactions confirmed"}
           </div>
         </div>
         {total > 0 && (
@@ -713,12 +718,12 @@ export default function ChatPage() {
 
     // Finalise bubble
     const best = pickBestChunk(collected);
-    setMessages(p => p.map(m => m.id === msgId
-      ? { ...m, content: best?.text || "", agentName: best?.agent || "Agent", status: "complete" }
-      : m
-    ));
-    return { content: best?.text || "", agentName: best?.agent || "Agent" };
-  }, []);
+      setMessages(p => p.map(m => m.id === msgId
+        ? { ...m, content: best?.text || "", agentName: best?.agent || "Agent", status: "complete" }
+        : m
+      ));
+      return { content: best?.text || "", agentName: best?.agent || "Agent" };
+    }, []);
 
   const send = useCallback(async (text: string) => {
     const t = text.trim();
@@ -782,7 +787,7 @@ export default function ChatPage() {
               : messages.map(msg => {
                   if (msg.role === "user")   return <UserBubble  key={msg.id} content={msg.content} timestamp={msg.timestamp} />;
                   if (msg.role === "system") return (
-                    <div key={msg.id} style={{ textAlign: "center" }}>
+                    <div key={msg.id} style={{ textAlign: "center" }} >
                       <span style={{ fontSize: 11, color: "#ef4444", background: "#450a0a20", border: "1px solid #450a0a40", padding: "5px 14px", borderRadius: 20, display: "inline-block" }}>
                         {msg.content}
                       </span>
