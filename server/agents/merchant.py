@@ -1,7 +1,11 @@
 """agents/merchant.py — Merchant Checkout Agent
-Emits ONLY a brief human-readable status message.
-The mandate data is stored in state (cart_mandate) for the settlement agent.
-The frontend shows a clean "processing" message, then the settlement receipt card.
+
+Emits the cart_mandate JSON directly as the message content.
+This lets the frontend's classifyContent detect it as "cart_mandate"
+and render the MandateCard during LIVE streaming — not just after refresh.
+
+Previously it emitted prose text, which meant the card was only visible
+after a page refresh (when the DB-saved MANDATE JSON was loaded).
 """
 from __future__ import annotations
 import json, logging
@@ -74,16 +78,17 @@ async def merchant_node(state: AgentState) -> dict:
         ],
     }
 
-    await _save_agent_response(state, "MANDATE", json.dumps(cart_mandate))
+    mandate_json = json.dumps(cart_mandate)
+    await _save_agent_response(state, "MANDATE", mandate_json)
     logger.info("[Merchant] Mandate ready — total: $%.2f, %d vendor(s)", total_usd, len(vendor_groups))
 
-    # Emit ONLY human-readable prose — no JSON.
-    # The settlement agent will emit the receipt JSON which renders as a card.
-    vendor_list = " · ".join(vg["name"] for vg in vendor_groups.values())
-    msg = f"Locked in ${total_usd:.2f} USDC across {len(vendor_groups)} vendor(s) — {vendor_list}. Processing payment…"
-
+    # Emit the mandate JSON directly as the message content.
+    # The frontend's classifyContent() detects { merchants: [...], amount: ... }
+    # and renders the MandateCard immediately during live streaming.
+    # Previously this emitted prose text which caused the card to only appear
+    # after a refresh (when the DB record was loaded and classifyContent ran on it).
     return {
         "cart_mandate": cart_mandate,
         "_merchant_reviewed": True,
-        "messages": [AIMessage(content=msg, name="MerchantAgent")],
+        "messages": [AIMessage(content=mandate_json, name="MerchantAgent")],
     }

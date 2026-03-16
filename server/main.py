@@ -171,22 +171,36 @@ async def run_sse(payload: Any = Body(None)):
                     "steps":            0,
                 }
 
-            # Track which message IDs we've already sent to avoid duplicates.
-            # stream_mode="values" re-emits the full message list after every node,
-            # so without deduplication the same message gets sent multiple times.
+            # ── KEY FIX: pre-populate sent_message_ids with ALL messages already
+            # in the checkpoint BEFORE this request starts.
+            # stream_mode="values" re-emits the full state snapshot after each node,
+            # which means Turn-1 messages (e.g. the shopping product_list JSON) get
+            # re-broadcast on the Turn-2 "Looks good" stream and confuse the frontend.
+            # By starting with the existing message IDs already in the set, we only
+            # ever emit messages that were ADDED during this specific request.
             sent_message_ids: set[int] = set()
+            try:
+                snapshot = _graph.get_state(config)
+                if snapshot and snapshot.values:
+                    for msg in snapshot.values.get("messages", []):
+                        if isinstance(msg, AIMessage):
+                            sent_message_ids.add(id(msg))
+                    logger.info(
+                        "[run_sse] Pre-seeded %d existing message IDs from checkpoint",
+                        len(sent_message_ids),
+                    )
+            except Exception as exc:
+                logger.warning("[run_sse] Could not read checkpoint: %s", exc)
 
             async for event in _graph.astream(init_state, config=config, stream_mode="values"):
                 messages = event.get("messages", [])
                 if not messages:
                     continue
 
-                # Emit only NEW messages in this event snapshot
                 for msg in messages:
                     if not isinstance(msg, AIMessage):
                         continue
 
-                    # Use object identity as a dedup key
                     msg_key = id(msg)
                     if msg_key in sent_message_ids:
                         continue

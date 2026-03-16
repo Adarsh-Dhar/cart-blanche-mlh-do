@@ -1,8 +1,10 @@
 """
 tool/x402_settlement.py — Smart Wallet + Session Key Settlement (ERC-4337)
 
-Spend limit fix: checks TOTAL cart vs session limit (not per-vendor).
-Default spend limit fallback raised to $10,000 for demo purposes.
+Fixes:
+- Added 10s timeout to Web3 HTTPProvider (was hanging indefinitely)
+- Reduced _wait_for_user_op polling from 20*2s=40s to 5*1s=5s
+- Separates confirmed receipts from failures (no fake 0xPENDING hashes)
 """
 
 from __future__ import annotations
@@ -32,8 +34,8 @@ USDC_CONTRACT = os.environ.get(
     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 )
 
-# Demo: allow large carts by default. Real production would enforce this strictly.
 DEFAULT_SPEND_LIMIT = float(os.environ.get("DEFAULT_SPEND_LIMIT_USD", "10000"))
+RPC_TIMEOUT = int(os.environ.get("RPC_TIMEOUT_SECONDS", "10"))
 
 
 def _decrypt_session_key(encrypted_hex: str, owner_address: str) -> str:
@@ -80,7 +82,6 @@ class X402SettlementTool:
     async def run_async(self, *, args: dict[str, Any], tool_context: Any) -> dict[str, Any]:
         from web3 import Web3
 
-        # ── 1. Parse mandate ─────────────────────────────────────────────────
         payment_mandate = args.get("payment_mandate", {})
         if isinstance(payment_mandate, str):
             try:
@@ -98,7 +99,7 @@ class X402SettlementTool:
         if not merchants:
             raise ValueError("cart_mandate.merchants is empty.")
 
-        # ── 2. Look up session key ───────────────────────────────────────────
+        # Look up session key
         db = await get_db()
         smart_wallet_record = None
 
@@ -125,16 +126,11 @@ class X402SettlementTool:
         smart_wallet_address = smart_wallet_record.smartWalletAddress
         owner_eoa            = smart_wallet_record.ownerEoa
 
-        # Use stored spend limit or fall back to generous demo default
         spend_limit_usdc = float(smart_wallet_record.spendLimitUsdc or DEFAULT_SPEND_LIMIT)
-        # If stored limit is very small (e.g. the old default of $200), use the demo default
         if spend_limit_usdc < DEFAULT_SPEND_LIMIT:
             spend_limit_usdc = DEFAULT_SPEND_LIMIT
-            logger.info("[X402] Spend limit too small, using demo default: $%.2f", spend_limit_usdc)
 
-        # ── 3. Check TOTAL cart amount vs spend limit (not per-vendor) ────────
         total_cart_raw = float(cart_mandate.get("amount") or cart_mandate.get("total_budget_amount") or 0)
-        # Normalise atomic units (> 10000 means it's in 6-decimal USDC units)
         total_cart_usd = total_cart_raw if total_cart_raw < 10_000 else total_cart_raw / 1_000_000
 
         if total_cart_usd > spend_limit_usdc:
@@ -148,19 +144,22 @@ class X402SettlementTool:
             smart_wallet_address[:12], spend_limit_usdc, total_cart_usd, len(merchants),
         )
 
-        # ── 4. Decrypt session key ───────────────────────────────────────────
         session_private_key = _decrypt_session_key(
             smart_wallet_record.sessionKeyEncryptedPrivate,
             owner_eoa,
         )
         session_account = Web3().eth.account.from_key(session_private_key)
 
-        # ── 5. Connect to RPC ────────────────────────────────────────────────
-        w3 = Web3(Web3.HTTPProvider(SKALE_RPC_URL))
+        # Connect with explicit timeout — prevents hanging on slow/unresponsive RPC
+        w3 = Web3(Web3.HTTPProvider(
+            SKALE_RPC_URL,
+            request_kwargs={"timeout": RPC_TIMEOUT},
+        ))
         if not w3.is_connected():
-            raise ConnectionError(f"Cannot connect to SKALE RPC: {SKALE_RPC_URL}")
+            raise ConnectionError(
+                f"Cannot connect to SKALE RPC: {SKALE_RPC_URL} (timeout={RPC_TIMEOUT}s)"
+            )
 
-        # Get nonce
         try:
             nonce_raw = w3.eth.call({
                 "to": ENTRY_POINT_ADDRESS,
@@ -170,18 +169,17 @@ class X402SettlementTool:
         except Exception:
             nonce = 0
 
-        # ── 6. Settle ALL vendors ─────────────────────────────────────────────
-        receipts:  list[dict] = []
-        total_usd: Decimal    = Decimal("0")
+        receipts: list[dict] = []
+        failures: list[dict] = []
+        total_usd: Decimal   = Decimal("0")
 
         for i, vendor in enumerate(merchants):
             vendor_address = w3.to_checksum_address(vendor["merchant_address"])
+            raw_val        = vendor.get("amount", 0)
+            usd_amt        = float(raw_val) if float(raw_val) < 10_000 else float(raw_val) / 1_000_000
+            usdc_atomic    = int(usd_amt * 1_000_000)
 
-            raw_val     = vendor.get("amount", 0)
-            usd_amt     = float(raw_val) if float(raw_val) < 10_000 else float(raw_val) / 1_000_000
-            usdc_atomic = int(usd_amt * 1_000_000)
-
-            logger.info("[X402] Vendor %d/%d: %s — $%.2f", i+1, len(merchants), vendor.get("name"), usd_amt)
+            logger.info("[X402] Vendor %d/%d: %s — $%.2f", i + 1, len(merchants), vendor.get("name"), usd_amt)
 
             usdc_calldata = _build_usdc_transfer_calldata(vendor_address, usdc_atomic)
             call_data     = _build_execute_calldata(USDC_CONTRACT, 0, usdc_calldata)
@@ -209,43 +207,79 @@ class X402SettlementTool:
             user_op["signature"] = signed.signature.hex()
 
             try:
-                response = w3.provider.make_request("eth_sendUserOperation", [user_op, ENTRY_POINT_ADDRESS])
+                response = w3.provider.make_request(
+                    "eth_sendUserOperation", [user_op, ENTRY_POINT_ADDRESS]
+                )
                 if "error" in response:
-                    raise ValueError(response["error"].get("message", str(response["error"])))
+                    error_msg = response["error"].get("message") or str(response["error"])
+                    raise ValueError(f"Bundler rejected: {error_msg}")
+
                 userop_hash_hex = response.get("result", "")
+                if not userop_hash_hex:
+                    raise ValueError(
+                        "Bundler returned empty result — the RPC endpoint may not "
+                        "support eth_sendUserOperation. Set BUNDLER_RPC_URL to a "
+                        "proper ERC-4337 bundler endpoint."
+                    )
+
                 tx_hash = await self._wait_for_user_op(w3, userop_hash_hex)
+                if not tx_hash:
+                    raise TimeoutError(
+                        f"Transaction not confirmed within {5}s. "
+                        f"UserOp submitted: {userop_hash_hex}"
+                    )
+
+                item_usd   = Decimal(str(usd_amt))
+                total_usd += item_usd
+                receipts.append({
+                    "commodity":        vendor.get("name", "Unknown"),
+                    "merchant_address": vendor_address,
+                    "amount_usd":       float(item_usd),
+                    "tx_hash":          tx_hash,
+                    "product_id":       (vendor.get("products") or [{}])[0].get("product_id"),
+                    "vendor_id":        vendor.get("vendor_id"),
+                })
+                logger.info("[X402] ✓ %s — tx: %s", vendor.get("name"), tx_hash)
+
             except Exception as exc:
-                logger.exception("[X402] UserOp failed for %s: %s", vendor.get("name"), exc)
-                tx_hash = f"0xPENDING_{i}_{abs(hash(str(exc)))}"
+                error_detail = str(exc)
+                logger.error("[X402] ✗ %s failed: %s", vendor.get("name"), error_detail)
+                failures.append({
+                    "commodity":  vendor.get("name", "Unknown"),
+                    "amount_usd": usd_amt,
+                    "error":      error_detail,
+                })
 
-            item_usd    = Decimal(str(usd_amt))
-            total_usd  += item_usd
-            receipts.append({
-                "commodity":        vendor.get("name", "Unknown"),
-                "merchant_address": vendor_address,
-                "amount_usd":       float(item_usd),
-                "tx_hash":          tx_hash,
-                "product_id":       (vendor.get("products") or [{}])[0].get("product_id"),
-                "vendor_id":        vendor.get("vendor_id"),
-            })
+        if not receipts and failures:
+            all_errors = "; ".join(f["error"] for f in failures)
+            raise ValueError(f"All payments failed: {all_errors}")
 
-        if not receipts:
-            raise ValueError("No vendors settled.")
+        if receipts:
+            try:
+                await self._record_order(
+                    receipts=receipts,
+                    total_usd=total_usd,
+                    user_wallet=smart_wallet_address,
+                    primary_tx=receipts[0]["tx_hash"],
+                )
+            except Exception as exc:
+                logger.warning("[DB] Order recording failed: %s", exc)
 
-        logger.info("[X402] Complete: %d TX, $%.2f total", len(receipts), total_usd)
-
-        await self._record_order(
-            receipts=receipts,
-            total_usd=total_usd,
-            user_wallet=smart_wallet_address,
-            primary_tx=receipts[0]["tx_hash"],
+        status = "settled" if not failures else "partial"
+        logger.info(
+            "[X402] Done — %d confirmed, %d failed, $%.2f total",
+            len(receipts), len(failures), total_usd,
         )
 
         return {
-            "status":   "settled",
+            "status":   status,
             "receipts": receipts,
+            "failures": failures,
             "network":  "SKALE Base Sepolia",
-            "details":  f"Settled {len(receipts)} vendor(s) · ${float(total_usd):.2f} USDC",
+            "details":  (
+                f"Settled {len(receipts)}/{len(receipts) + len(failures)} vendor(s) · "
+                f"${float(total_usd):.2f} USDC"
+            ),
         }
 
     def _get_user_op_hash(self, w3, user_op, entry_point, chain_id) -> bytes:
@@ -266,51 +300,57 @@ class X402SettlementTool:
             ],
         )
         user_op_hash = w3.keccak(packed)
-        return w3.keccak(encode(["bytes32","address","uint256"], [user_op_hash, entry_point, chain_id]))
+        return w3.keccak(encode(
+            ["bytes32", "address", "uint256"],
+            [user_op_hash, entry_point, chain_id]
+        ))
 
-    async def _wait_for_user_op(self, w3, user_op_hash, max_attempts=20, poll_interval=2.0) -> str:
+    async def _wait_for_user_op(
+        self,
+        w3,
+        user_op_hash: str,
+        max_attempts: int = 5,       # was 20 — now fails fast after 5 seconds
+        poll_interval: float = 1.0,  # was 2.0s
+    ) -> str:
         import asyncio
         for _ in range(max_attempts):
             try:
                 r = w3.provider.make_request("eth_getUserOperationReceipt", [user_op_hash])
                 res = r.get("result")
                 if res and res.get("receipt"):
-                    return res["receipt"].get("transactionHash", user_op_hash)
+                    return res["receipt"].get("transactionHash", "")
             except Exception:
                 pass
             await asyncio.sleep(poll_interval)
-        return user_op_hash
+        return ""  # empty string = timeout, caller adds to failures[]
 
     async def _record_order(self, receipts, total_usd, user_wallet, primary_tx) -> None:
         db = await get_db()
-        try:
-            order = await db.order.create(data={
-                "totalAmount": total_usd,
-                "status":      "PAID",
-                "txHash":      primary_tx,
-                "userWallet":  user_wallet,
+        order = await db.order.create(data={
+            "totalAmount": total_usd,
+            "status":      "PAID",
+            "txHash":      primary_tx,
+            "userWallet":  user_wallet,
+        })
+        for receipt in receipts:
+            product = None
+            if receipt.get("product_id"):
+                product = await db.product.find_unique(
+                    where={"productID": receipt["product_id"]},
+                    include={"vendor": True},
+                )
+            if product is None:
+                matches = await db.product.find_many(
+                    where={"name": {"contains": receipt["commodity"], "mode": "insensitive"}},
+                    take=1, include={"vendor": True},
+                )
+                product = matches[0] if matches else None
+            if product is None:
+                continue
+            await db.orderitem.create(data={
+                "orderId":   order.id,
+                "productId": product.id,
+                "vendorId":  product.vendorId,
+                "quantity":  1,
+                "price":     Decimal(str(receipt["amount_usd"])),
             })
-            for receipt in receipts:
-                product = None
-                if receipt.get("product_id"):
-                    product = await db.product.find_unique(
-                        where={"productID": receipt["product_id"]},
-                        include={"vendor": True},
-                    )
-                if product is None:
-                    matches = await db.product.find_many(
-                        where={"name": {"contains": receipt["commodity"], "mode": "insensitive"}},
-                        take=1, include={"vendor": True},
-                    )
-                    product = matches[0] if matches else None
-                if product is None:
-                    continue
-                await db.orderitem.create(data={
-                    "orderId":   order.id,
-                    "productId": product.id,
-                    "vendorId":  product.vendorId,
-                    "quantity":  1,
-                    "price":     Decimal(str(receipt["amount_usd"])),
-                })
-        except Exception as exc:
-            logger.exception("[DB] Order recording failed: %s", exc)
