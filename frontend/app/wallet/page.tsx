@@ -15,7 +15,7 @@ import {
   Cpu,
   Lock,
 } from "lucide-react";
-import { useBurnerWallet, type BurnerWalletInfo } from "@/hooks/useBurnerWallet";
+import { useBurnerWallet, type BurnerWalletInfo } from "@/hooks/useBurnerwallet";
 
 function Card({
   children,
@@ -224,10 +224,11 @@ export default function WalletPage() {
               >
                 Active Burner Wallet
               </div>
-              <div style={{ fontSize: 11, color: "#4a5568", marginTop: 2 }}>
-                Funded: ${existingSession.fundedAmount} USDC · Expires:{" "}
-                {existingSession.expiresAt.toLocaleString()} · Address:{" "}
-                {existingSession.burnerAddress.slice(0, 10)}…
+              <div
+                style={{ fontSize: 11, color: "#4a5568", marginTop: 2 }}>
+                Funded: ${existingSession.fundedAmount} USDC · Expires: {" "}
+                {existingSession.expiresAt.toLocaleString()} · Address: {" "}
+                {existingSession.burnerAddress ? existingSession.burnerAddress.slice(0, 10) : "N/A"}…
               </div>
             </div>
             <button
@@ -713,10 +714,8 @@ export default function WalletPage() {
         </Card>
       </div>
 
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      {/* Only render style tag once, and ensure single quotes for URL */}
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');\n@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>
   );
 }

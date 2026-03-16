@@ -1,19 +1,7 @@
 /**
  * hooks/useBurnerWallet.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Delegated Burner EOA Architecture — replaces the ERC-4337 Smart Wallet flow.
- *
- * Why this is simpler and more reliable on SKALE:
- *  - SKALE transactions are already GASLESS — no Paymasters or Bundlers needed
- *  - Standard EOA transactions work natively on every EVM chain
- *  - No METHOD_NOT_FOUND errors from missing ERC-4337 bundler infrastructure
- *  - Faster settlement (no alternative mempool wait)
- *
- * Flow:
- *  1. Generate a fresh temporary keypair (Burner Wallet) in-browser via viem
- *  2. User's MetaMask sends a standard USDC transfer to fund the Burner address
- *  3. Encrypted private key is saved to backend (/api/wallet/session-key)
- *  4. Backend settlement agent signs txs directly with the Burner key
+ * Delegated Burner EOA Architecture
  */
 
 "use client";
@@ -24,10 +12,12 @@ import {
   custom,
   encodeFunctionData,
   parseUnits,
+  keccak256,
+  toBytes,
+  toHex,
   type Address,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { keccak256, toBytes, toHex } from "viem";
 
 // ── Chain config (SKALE Base Sepolia) ─────────────────────────────────────────
 export const skaleBaseSepolia = {
@@ -50,7 +40,6 @@ export const skaleBaseSepolia = {
   },
 } as const;
 
-// ── USDC contract on SKALE Base Sepolia ───────────────────────────────────────
 const USDC_CONTRACT_ADDRESS =
   "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" as Address;
 
@@ -66,7 +55,6 @@ const USDC_ABI = [
   },
 ] as const;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface BurnerWalletInfo {
   burnerAddress: Address;
   ownerEoa: Address;
@@ -82,7 +70,7 @@ export type BurnerWalletStatus =
   | "ready"
   | "error";
 
-// ── Simple XOR encryption — mirrors the Python decrypt in x402_settlement.py ──
+// ── XOR encryption ────────────────────────────────────────────────────────────
 function encryptPrivateKey(privateKey: string, ownerAddress: string): string {
   const keyHex = keccak256(toBytes(ownerAddress.toLowerCase()));
   const pkBytes = toBytes(privateKey as `0x${string}`);
@@ -97,9 +85,6 @@ export function useBurnerWallet() {
   const [error, setError] = useState<string | null>(null);
   const [walletInfo, setWalletInfo] = useState<BurnerWalletInfo | null>(null);
 
-  /**
-   * Main flow: Generate burner → Fund with USDC → Save to backend
-   */
   const authorizeShoppingAgent = useCallback(
     async ({
       fundAmountUsdc = 100,
@@ -114,90 +99,91 @@ export function useBurnerWallet() {
 
       setError(null);
 
-      // ── Step 1: Generate the Burner Wallet ─────────────────────────────────
-      setStatus("generating");
+      try {
+        setStatus("generating");
 
-      const burnerPrivateKey = generatePrivateKey();
-      const burnerAccount = privateKeyToAccount(burnerPrivateKey);
-      const burnerAddress = burnerAccount.address;
+        const burnerPrivateKey = generatePrivateKey();
+        const burnerAccount = privateKeyToAccount(burnerPrivateKey);
+        const burnerAddress = burnerAccount.address;
 
-      console.log("[BurnerWallet] Generated burner address:", burnerAddress);
+        console.log("[BurnerWallet] Generated burner address:", burnerAddress);
 
-      // ── Step 2: Fund the Burner via user's MetaMask ────────────────────────
-      setStatus("funding");
+        setStatus("funding");
 
-      const walletClient = createWalletClient({
-        chain: skaleBaseSepolia,
-        transport: custom(window.ethereum),
-      });
+        const walletClient = createWalletClient({
+          chain: skaleBaseSepolia,
+          transport: custom(window.ethereum),
+        });
 
-      const [ownerEoa] = await walletClient.requestAddresses();
+        const [ownerEoa] = await walletClient.requestAddresses();
 
-      const fundCalldata = encodeFunctionData({
-        abi: USDC_ABI,
-        functionName: "transfer",
-        args: [burnerAddress, parseUnits(fundAmountUsdc.toFixed(6), 6)],
-      });
+        const fundCalldata = encodeFunctionData({
+          abi: USDC_ABI,
+          functionName: "transfer",
+          args: [burnerAddress, parseUnits(fundAmountUsdc.toString(), 6)],
+        });
 
-      console.log(
-        `[BurnerWallet] Funding burner with $${fundAmountUsdc} USDC from ${ownerEoa}...`
-      );
+        console.log(`[BurnerWallet] Funding burner with $${fundAmountUsdc} USDC from ${ownerEoa}...`);
 
-      const txHash = await walletClient.sendTransaction({
-        account: ownerEoa,
-        to: USDC_CONTRACT_ADDRESS,
-        data: fundCalldata,
-        chain: skaleBaseSepolia,
-      });
+        const txHash = await walletClient.sendTransaction({
+          account: ownerEoa,
+          to: USDC_CONTRACT_ADDRESS,
+          data: fundCalldata,
+          chain: skaleBaseSepolia,
+        });
 
-      console.log("[BurnerWallet] Fund tx hash:", txHash);
+        console.log("[BurnerWallet] Fund tx hash:", txHash);
 
-      // ── Step 3: Save encrypted private key to backend ─────────────────────
-      setStatus("saving");
+        setStatus("saving");
 
-      const expiresAt = new Date(
-        Date.now() + sessionDurationHours * 60 * 60 * 1000
-      );
-      const encryptedKey = encryptPrivateKey(burnerPrivateKey, ownerEoa);
+        const expiresAt = new Date(Date.now() + sessionDurationHours * 60 * 60 * 1000);
+        
+        // Encrypting the RAW private key string using the EOA as the XOR key
+        const encryptedKey = encryptPrivateKey(burnerPrivateKey, ownerEoa);
 
-      const res = await fetch("/api/wallet/session-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // Re-use the SmartWallet schema fields — burner address maps to smartWalletAddress
+        // Using the EXACT schema names your backend route expects
+        const payload = {
           smartWalletAddress: burnerAddress,
-          sessionKeyPublic: burnerAddress,           // same for EOA (no separate session key)
+          sessionKeyPublic: burnerAddress,
           sessionKeyEncryptedPrivate: encryptedKey,
           spendLimitUsdc: fundAmountUsdc,
           expiresAt: expiresAt.toISOString(),
           ownerEoa: ownerEoa,
-        }),
-      });
+        };
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to save burner wallet to backend");
+        const res = await fetch("/api/wallet/session-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to save burner wallet to backend");
+        }
+
+        const info: BurnerWalletInfo = {
+          burnerAddress,
+          ownerEoa,
+          fundedAmount: fundAmountUsdc,
+          expiresAt,
+        };
+
+        setWalletInfo(info);
+        setStatus("ready");
+
+        console.log("[BurnerWallet] Setup complete. Agent authorized.");
+        return info;
+      } catch (err: any) {
+        console.error("[BurnerWallet] Error:", err);
+        setError(err.message || "An error occurred");
+        setStatus("error");
+        throw err;
       }
-
-      const info: BurnerWalletInfo = {
-        burnerAddress,
-        ownerEoa,
-        fundedAmount: fundAmountUsdc,
-        expiresAt,
-      };
-
-      setWalletInfo(info);
-      setStatus("ready");
-
-      console.log("[BurnerWallet] Setup complete. Agent authorized.");
-      return info;
     },
     []
   );
 
-  /**
-   * Check if an active burner wallet session exists
-   */
   const checkExistingSession = useCallback(
     async (): Promise<BurnerWalletInfo | null> => {
       try {
