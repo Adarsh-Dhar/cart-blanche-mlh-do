@@ -11,7 +11,7 @@ export function useX402() {
     }
       const client = createWalletClient({
         chain: {
-          id: 324705682,
+          id: 84532,
           name: 'SKALE Base Sepolia',
           network: 'skale-base-sepolia',
           nativeCurrency: {
@@ -43,7 +43,7 @@ export function useX402() {
     } else {
       currentClient = createWalletClient({
           chain: {
-            id: 324705682,
+            id: 84532,
             name: 'SKALE Base Sepolia',
             network: 'skale-base-sepolia',
             nativeCurrency: {

@@ -19,7 +19,7 @@ interface WalletClient {
 }
 
 const skaleBaseSepolia = {
-  id: 324705682,
+  id: 84532,
   name: 'SKALE Base Sepolia Testnet',
   network: 'skale-base-sepolia',
   nativeCurrency: { name: 'SKALE Credits', symbol: 'CREDIT', decimals: 18 },

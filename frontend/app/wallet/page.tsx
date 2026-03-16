@@ -10,31 +10,12 @@ import {
   Loader2,
   ArrowRight,
   RefreshCw,
-  Clock,
   DollarSign,
   Key,
   Cpu,
+  Lock,
 } from "lucide-react";
-import { useSmartWallet, type SmartWalletInfo } from "@/hooks/useSmartwallet";
-
-// ── USDC contract on SKALE Base Sepolia (replace with actual address) ─────────
-const USDC_ADDRESS = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" as `0x${string}`;
-
-function StatusDot({ active }: { active: boolean }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: active ? "hsl(66,100%,50%)" : "#2d3748",
-        boxShadow: active ? "0 0 8px hsl(66,100%,50%,0.8)" : "none",
-        flexShrink: 0,
-      }}
-    />
-  );
-}
+import { useBurnerWallet, type BurnerWalletInfo } from "@/hooks/useBurnerWallet";
 
 function Card({
   children,
@@ -100,15 +81,13 @@ function InfoRow({
 
 export default function WalletPage() {
   const { status, walletInfo, authorizeShoppingAgent, checkExistingSession } =
-    useSmartWallet();
+    useBurnerWallet();
 
   const [depositAmount, setDepositAmount] = useState("100");
-  const [spendLimit, setSpendLimit] = useState("200");
   const [sessionHours, setSessionHours] = useState("24");
   const [existingSession, setExistingSession] =
-    useState<SmartWalletInfo | null>(null);
+    useState<BurnerWalletInfo | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [depositOnly, setDepositOnly] = useState(false);
 
   useEffect(() => {
     checkExistingSession().then((s) => setExistingSession(s));
@@ -118,12 +97,8 @@ export default function WalletPage() {
     setActionError(null);
     try {
       const info = await authorizeShoppingAgent({
-        spendLimitUsdc: parseFloat(spendLimit) || 200,
+        fundAmountUsdc: parseFloat(depositAmount) || 100,
         sessionDurationHours: parseInt(sessionHours) || 24,
-        usdcContractAddress: USDC_ADDRESS,
-        fundAmountUsdc: depositOnly
-          ? parseFloat(depositAmount) || 100
-          : undefined,
       });
       setExistingSession(info);
     } catch (err: any) {
@@ -135,14 +110,12 @@ export default function WalletPage() {
     status !== "idle" && status !== "ready" && status !== "error";
 
   const statusLabels: Record<string, string> = {
-    idle: "Ready",
-    deriving: "Deriving smart wallet address…",
-    generating_key: "Generating session key…",
-    registering: "Registering on-chain (MetaMask)…",
-    funding: "Depositing USDC (MetaMask)…",
-    saving: "Saving session key to backend…",
-    ready: "Authorization complete!",
-    error: "Error",
+    idle:       "Ready",
+    generating: "Generating burner wallet…",
+    funding:    "Depositing USDC (MetaMask)…",
+    saving:     "Saving wallet to backend…",
+    ready:      "Burner wallet authorized!",
+    error:      "Error",
   };
 
   return (
@@ -164,7 +137,8 @@ export default function WalletPage() {
           width: 600,
           height: 600,
           borderRadius: "50%",
-          background: "radial-gradient(circle, hsl(66,100%,50%,0.06), transparent 70%)",
+          background:
+            "radial-gradient(circle, hsl(66,100%,50%,0.06), transparent 70%)",
           pointerEvents: "none",
         }}
       />
@@ -190,7 +164,7 @@ export default function WalletPage() {
             }}
           >
             <Wallet size={12} />
-            Recharge Hub
+            Burner Wallet
           </div>
           <h1
             style={{
@@ -200,14 +174,14 @@ export default function WalletPage() {
               lineHeight: 1.1,
             }}
           >
-            Smart Wallet &{" "}
+            Agent{" "}
             <span
               style={{
                 color: "hsl(66,100%,50%)",
                 textShadow: "0 0 30px hsl(66,100%,50%,0.3)",
               }}
             >
-              Agent Authorization
+              Authorization
             </span>
           </h1>
           <p
@@ -219,9 +193,9 @@ export default function WalletPage() {
               maxWidth: 520,
             }}
           >
-            Deposit USDC into your Smart Wallet, then authorize the shopping
-            agent with a spending limit. No more signing per-cart — the agent
-            settles autonomously within your rules.
+            Deposit USDC into a temporary burner wallet. The shopping agent
+            settles purchases autonomously — no MetaMask popup per transaction,
+            no gas fees on SKALE.
           </p>
         </div>
 
@@ -248,11 +222,12 @@ export default function WalletPage() {
                   color: "hsl(66,100%,50%)",
                 }}
               >
-                Active Session Key
+                Active Burner Wallet
               </div>
               <div style={{ fontSize: 11, color: "#4a5568", marginTop: 2 }}>
-                Spend limit: ${existingSession.spendLimitUsdc} USDC · Expires:{" "}
-                {existingSession.expiresAt.toLocaleString()}
+                Funded: ${existingSession.fundedAmount} USDC · Expires:{" "}
+                {existingSession.expiresAt.toLocaleString()} · Address:{" "}
+                {existingSession.burnerAddress.slice(0, 10)}…
               </div>
             </div>
             <button
@@ -272,7 +247,7 @@ export default function WalletPage() {
           </div>
         )}
 
-        {/* Three-step flow diagram */}
+        {/* 3-step diagram */}
         <div
           style={{
             display: "grid",
@@ -283,11 +258,26 @@ export default function WalletPage() {
           }}
         >
           {[
-            { icon: DollarSign, label: "Deposit USDC", sublabel: "EOA → Smart Wallet", done: !!existingSession },
+            {
+              icon: DollarSign,
+              label: "Deposit USDC",
+              sublabel: "EOA → Burner Wallet",
+              done: !!existingSession,
+            },
             null,
-            { icon: Key, label: "Register Key", sublabel: "On-chain delegation", done: !!existingSession },
+            {
+              icon: Key,
+              label: "Save Key",
+              sublabel: "Encrypted in backend",
+              done: !!existingSession,
+            },
             null,
-            { icon: Cpu, label: "Agent Active", sublabel: "Autonomous checkout", done: !!existingSession },
+            {
+              icon: Cpu,
+              label: "Agent Active",
+              sublabel: "Gasless checkout",
+              done: !!existingSession,
+            },
           ].map((step, i) => {
             if (step === null) {
               return (
@@ -323,9 +313,7 @@ export default function WalletPage() {
                       ? "hsl(66,100%,50%,0.15)"
                       : "#1a2332",
                     border: `1px solid ${
-                      step.done
-                        ? "hsl(66,100%,50%,0.5)"
-                        : "#2d3748"
+                      step.done ? "hsl(66,100%,50%,0.5)" : "#2d3748"
                     }`,
                     display: "flex",
                     alignItems: "center",
@@ -337,9 +325,7 @@ export default function WalletPage() {
                 >
                   <Icon
                     size={18}
-                    color={
-                      step.done ? "hsl(66,100%,50%)" : "#2d3748"
-                    }
+                    color={step.done ? "hsl(66,100%,50%)" : "#2d3748"}
                   />
                 </div>
                 <div style={{ textAlign: "center" }}>
@@ -352,7 +338,13 @@ export default function WalletPage() {
                   >
                     {step.label}
                   </div>
-                  <div style={{ fontSize: 10, color: "#2d3748", marginTop: 2 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "#2d3748",
+                      marginTop: 2,
+                    }}
+                  >
                     {step.sublabel}
                   </div>
                 </div>
@@ -377,13 +369,17 @@ export default function WalletPage() {
             }}
           >
             <Shield size={12} />
-            Authorization Settings
+            Burner Wallet Settings
           </div>
 
           <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 16,
+            }}
           >
-            {/* Spend Limit */}
+            {/* Deposit Amount */}
             <div>
               <label
                 style={{
@@ -395,7 +391,7 @@ export default function WalletPage() {
                   letterSpacing: "0.1em",
                 }}
               >
-                Spend Limit (USDC)
+                Deposit Amount (USDC)
               </label>
               <div style={{ position: "relative" }}>
                 <span
@@ -412,8 +408,8 @@ export default function WalletPage() {
                 </span>
                 <input
                   type="number"
-                  value={spendLimit}
-                  onChange={(e) => setSpendLimit(e.target.value)}
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
                   min="1"
                   style={{
                     width: "100%",
@@ -428,6 +424,9 @@ export default function WalletPage() {
                     boxSizing: "border-box",
                   }}
                 />
+              </div>
+              <div style={{ fontSize: 10, color: "#4a5568", marginTop: 6 }}>
+                Sent from your MetaMask to the burner address
               </div>
             </div>
 
@@ -470,83 +469,6 @@ export default function WalletPage() {
             </div>
           </div>
 
-          {/* Deposit section */}
-          <div style={{ marginTop: 20 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 12,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "#4a5568",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                Fund Smart Wallet (Optional)
-              </span>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={depositOnly}
-                  onChange={(e) => setDepositOnly(e.target.checked)}
-                  style={{ cursor: "pointer" }}
-                />
-                <span style={{ fontSize: 12, color: "#64748b" }}>
-                  Include deposit
-                </span>
-              </label>
-            </div>
-
-            {depositOnly && (
-              <div style={{ position: "relative" }}>
-                <span
-                  style={{
-                    position: "absolute",
-                    left: 12,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "#4a5568",
-                    fontSize: 14,
-                  }}
-                >
-                  $
-                </span>
-                <input
-                  type="number"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  min="1"
-                  placeholder="Amount in USDC"
-                  style={{
-                    width: "100%",
-                    padding: "12px 12px 12px 28px",
-                    background: "#080c10",
-                    border: "1px solid #1a2332",
-                    borderRadius: 10,
-                    color: "#e2e8f0",
-                    fontSize: 14,
-                    fontFamily: "'Syne', sans-serif",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-            )}
-          </div>
-
           {/* Status bar */}
           {isLoading && (
             <div
@@ -564,7 +486,10 @@ export default function WalletPage() {
               <Loader2
                 size={14}
                 color="hsl(66,100%,50%)"
-                style={{ animation: "spin 1s linear infinite", flexShrink: 0 }}
+                style={{
+                  animation: "spin 1s linear infinite",
+                  flexShrink: 0,
+                }}
               />
               <span style={{ fontSize: 12, color: "hsl(66,100%,50%)" }}>
                 {statusLabels[status] || status}
@@ -620,9 +545,7 @@ export default function WalletPage() {
               width: "100%",
               marginTop: 20,
               padding: "16px 24px",
-              background: isLoading
-                ? "#1a2332"
-                : "hsl(66,100%,50%)",
+              background: isLoading ? "#1a2332" : "hsl(66,100%,50%)",
               border: "none",
               borderRadius: 12,
               color: isLoading ? "#4a5568" : "#000",
@@ -634,33 +557,34 @@ export default function WalletPage() {
               alignItems: "center",
               justifyContent: "center",
               gap: 10,
-              boxShadow: isLoading
-                ? "none"
-                : "0 0 32px hsl(66,100%,50%,0.3)",
+              boxShadow: isLoading ? "none" : "0 0 32px hsl(66,100%,50%,0.3)",
               transition: "all 0.2s",
             }}
           >
             {isLoading ? (
               <>
-                <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                <Loader2
+                  size={16}
+                  style={{ animation: "spin 1s linear infinite" }}
+                />
                 {statusLabels[status]}
               </>
             ) : existingSession ? (
               <>
                 <RefreshCw size={16} />
-                Renew Authorization
+                Recharge Burner Wallet
               </>
             ) : (
               <>
                 <Zap size={16} />
-                {depositOnly ? "Deposit & Authorize Agent" : "Authorize Shopping Agent"}
+                Deposit & Authorize Agent
                 <ArrowRight size={14} />
               </>
             )}
           </button>
         </Card>
 
-        {/* Wallet Info Card */}
+        {/* Active wallet info */}
         {walletInfo && (
           <Card>
             <div
@@ -677,21 +601,17 @@ export default function WalletPage() {
               }}
             >
               <CheckCircle2 size={12} color="hsl(66,100%,50%)" />
-              Session Key Registered
+              Burner Wallet Active
             </div>
             <InfoRow
-              label="Smart Wallet"
-              value={walletInfo.smartWalletAddress}
+              label="Burner Address"
+              value={walletInfo.burnerAddress}
               mono
             />
+            <InfoRow label="Owner EOA" value={walletInfo.ownerEoa} mono />
             <InfoRow
-              label="Session Key (public)"
-              value={walletInfo.sessionKeyPublic}
-              mono
-            />
-            <InfoRow
-              label="Spend Limit"
-              value={`$${walletInfo.spendLimitUsdc} USDC`}
+              label="Funded Amount"
+              value={`$${walletInfo.fundedAmount} USDC`}
             />
             <InfoRow
               label="Expires"
@@ -716,19 +636,19 @@ export default function WalletPage() {
           </div>
           {[
             {
-              icon: Wallet,
-              title: "Smart Wallet Contract",
-              desc: "An ERC-4337 account contract derived from your EOA. You own it — no custody risk.",
-            },
-            {
               icon: Key,
-              title: "Session Key",
-              desc: "A temporary keypair. The public half is registered on-chain with your spending rules. The private half is encrypted and stored by the agent.",
+              title: "Burner EOA Wallet",
+              desc: "A temporary Ethereum wallet generated in your browser. You fund it once with USDC — no smart contract deployment required.",
             },
             {
-              icon: Cpu,
-              title: "Autonomous Settlement",
-              desc: "When the agent finds a 402 challenge, it signs a UserOp with the session key. The Bundler executes it. No popups.",
+              icon: Lock,
+              title: "Encrypted Key Storage",
+              desc: "The private key is XOR-encrypted with your wallet address and stored on the backend. The agent uses it to sign transactions autonomously.",
+            },
+            {
+              icon: Zap,
+              title: "Gasless Settlement on SKALE",
+              desc: "SKALE transactions have zero gas cost. The agent signs standard eth_sendRawTransaction calls with gasPrice=0. Fast, cheap, no popups.",
             },
           ].map(({ icon: Icon, title, desc }) => (
             <div
@@ -774,6 +694,22 @@ export default function WalletPage() {
               </div>
             </div>
           ))}
+          {/* Security note */}
+          <div
+            style={{
+              marginTop: 16,
+              padding: "12px 14px",
+              background: "#1a233240",
+              borderRadius: 8,
+              fontSize: 11,
+              color: "#4a5568",
+              lineHeight: 1.6,
+            }}
+          >
+            <strong style={{ color: "#64748b" }}>Security:</strong> The maximum
+            loss is strictly limited to the USDC deposited into this burner
+            address. Your main MetaMask wallet is never exposed.
+          </div>
         </Card>
       </div>
 

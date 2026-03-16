@@ -15,7 +15,7 @@ from server.db import get_db
 
 logger = logging.getLogger(__name__)
 _FALLBACK = "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9"
-_CHAIN_ID = 324705682
+_CHAIN_ID = 84532
 
 
 async def _save_agent_response(state: AgentState, rtype: str, text: str) -> None:
