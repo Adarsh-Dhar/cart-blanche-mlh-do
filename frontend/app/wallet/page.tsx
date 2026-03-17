@@ -1,4 +1,3 @@
-
 "use client";
 import { connect } from "@stacks/connect";
 
@@ -110,39 +109,31 @@ export default function WalletPage() {
 
   const connectStacksWallet = () => {
     connect().then(result => {
-      // result.addresses can be AddressEntry[] or { stx: { mainnet, testnet } | AddressEntry[] }
       let addr = null;
       const addresses = result?.addresses;
+      // Always select the STX address for Stacks principal
       if (Array.isArray(addresses)) {
-        // Leather/Xverse: result.addresses is AddressEntry[]
-        // Each entry is likely an object, extract the address string
-        if (addresses.length > 0 && typeof addresses[0] === 'object' && addresses[0].address) {
-          addr = addresses[0].address;
-        } else if (typeof addresses[0] === 'string') {
-          addr = addresses[0];
+        const stxAddressObj = addresses.find((a) => a.symbol === 'STX' && typeof a.address === 'string' && a.address.startsWith('ST'));
+        if (stxAddressObj && stxAddressObj.address) {
+          addr = stxAddressObj.address;
         }
       } else if (addresses && typeof addresses === "object" && !Array.isArray(addresses) && 'stx' in addresses) {
         const stx = (addresses as { stx: any }).stx;
         if (Array.isArray(stx)) {
-          if (stx.length > 0 && typeof stx[0] === 'object' && stx[0].address) {
-            addr = stx[0].address;
-          } else if (typeof stx[0] === 'string') {
-            addr = stx[0];
+          const validStx = stx.find((s) => typeof s.address === 'string' && s.address.startsWith('ST'));
+          if (validStx && validStx.address) {
+            addr = validStx.address;
           }
         } else if (stx && typeof stx === "object") {
-          // stx.mainnet or stx.testnet could be an object or string
-          if (stx.testnet && typeof stx.testnet === 'object' && stx.testnet.address) {
+          if (stx.testnet && typeof stx.testnet === 'object' && stx.testnet.address && stx.testnet.address.startsWith('ST')) {
             addr = stx.testnet.address;
-          } else if (stx.testnet && typeof stx.testnet === 'string') {
+          } else if (stx.testnet && typeof stx.testnet === 'string' && stx.testnet.startsWith('ST')) {
             addr = stx.testnet;
-          } else if (stx.mainnet && typeof stx.mainnet === 'object' && stx.mainnet.address) {
-            addr = stx.mainnet.address;
-          } else if (stx.mainnet && typeof stx.mainnet === 'string') {
-            addr = stx.mainnet;
           }
         }
       }
-      if (addr && typeof addr === 'string') setStacksAddress(addr);
+      // Only set if valid Stacks address
+      if (addr && typeof addr === 'string' && addr.startsWith('ST')) setStacksAddress(addr);
     });
   };
 
