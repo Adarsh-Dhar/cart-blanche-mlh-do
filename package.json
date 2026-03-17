@@ -1,5 +1,6 @@
 {
 	"dependencies": {
+		"@noble/hashes": "^2.0.1",
 		"@prisma/adapter-pg": "^7.5.0",
 		"@prisma/client": "^7.5.0",
 		"@types/pg": "^8.18.0",

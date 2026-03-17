@@ -1,123 +1,188 @@
 """
-tool/x402_settlement.py — Burner EOA Settlement (Native SKALE)
-===============================================================
+tool/x402_settlement.py — Stacks Blockchain Settlement (SIP-010)
+=================================================================
 
-FIXES vs original:
-  1. USDC_CONTRACT default updated to match the SKALE-side contract
-     (must match USDC_CONTRACT_ADDRESS in useBurnerwallet.ts)
-  2. gasPrice explicitly set to 0 (SKALE is gasless — w3.eth.gas_price
-     can return non-zero on some SKALE nodes, which causes tx rejection)
-  3. Added USDC balance check on the burner BEFORE attempting settlement
-     with a clear error message pointing the user to /wallet
-  4. drip_sfuel_to_burner is only called when there is a MASTER_PRIVATE_KEY
-     (was always called before, silently failing)
-  5. amount_atomic calculation cleaned up — no divide-by-1000 hack
+MIGRATED FROM: SKALE EVM / web3.py / ERC-20
+MIGRATED TO:   Stacks Bitcoin L2 / SIP-010 tokens (USDCx / sBTC)
+
+Architecture:
+  - Python reads the burner wallet record and decrypts the private key
+  - Python calls a Node.js helper (stacks_tx_builder.ts compiled to .js)
+    via subprocess to construct, sign, and broadcast Stacks transactions
+  - This is necessary because Python Stacks tooling is incomplete for
+    signing complex contract calls; the @stacks/transactions TS SDK is authoritative
+
+Key differences from EVM version:
+  1. No gasPrice=0 trick — Stacks requires STX for transaction fees
+  2. drip_stx_to_burner() replaces drip_sfuel_to_burner()
+  3. SIP-010 transfer function args: [amount, sender, recipient, memo]
+  4. Contract calls go through stacks_tx_builder.js subprocess
+  5. XOR encryption key = sha256(stacksPrincipal) not keccak256(eoa)
 """
 
-from web3 import Web3, Account
-from ..db import get_db
+import asyncio
+import hashlib
+import json
 import logging
 import os
-import json
+import subprocess
+import datetime
 from decimal import Decimal
 from typing import Any
 
+from ..db import get_db
+
 logger = logging.getLogger(__name__)
 
-# ── Network config ─────────────────────────────────────────────────────────────
-SKALE_RPC_URL = os.environ.get(
-    "SKALE_RPC_URL",
-    "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
-)
-SKALE_CHAIN_ID = int(os.environ.get("SKALE_CHAIN_ID", "324705682"))
-RPC_TIMEOUT = int(os.environ.get("RPC_TIMEOUT_SECONDS", "30"))
+# ── Stacks network config ──────────────────────────────────────────────────────
+STACKS_NETWORK = os.environ.get("STACKS_NETWORK", "testnet")  # "testnet" | "mainnet"
 
-# ── USDC on SKALE Base Sepolia ─────────────────────────────────────────────────
-# MUST match USDC_CONTRACT_ADDRESS in frontend/hooks/useBurnerwallet.ts
-USDC_CONTRACT = os.environ.get(
-    "USDC_CONTRACT_ADDRESS",
-    "0x5425890298aed601595a70AB815c96711a31Bc65",
+# ── SIP-010 contract addresses ─────────────────────────────────────────────────
+# Must match frontend/hooks/useBurnerwallet.ts
+USDCX_CONTRACT_ADDRESS = os.environ.get(
+    "USDCX_CONTRACT_ADDRESS",
+    "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
 )
+USDCX_CONTRACT_NAME = os.environ.get("USDCX_CONTRACT_NAME", "usdcx-token")
+
+SBTC_CONTRACT_ADDRESS = os.environ.get(
+    "SBTC_CONTRACT_ADDRESS",
+    "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
+)
+SBTC_CONTRACT_NAME = os.environ.get("SBTC_CONTRACT_NAME", "sbtc-token")
+
+# Path to the compiled stacks_tx_builder.js
+STACKS_TX_BUILDER_PATH = os.environ.get(
+    "STACKS_TX_BUILDER_PATH",
+    os.path.join(os.path.dirname(__file__), "stacks_tx_builder.js"),
+)
+
+# Master Stacks wallet (holds STX for dripping to burners)
+MASTER_STACKS_PRIVATE_KEY = os.environ.get("MASTER_STACKS_PRIVATE_KEY", "")
+MASTER_STACKS_ADDRESS = os.environ.get("MASTER_STACKS_ADDRESS", "")
 
 DEFAULT_SPEND_LIMIT = float(os.environ.get("DEFAULT_SPEND_LIMIT_USD", "10000"))
+STX_DRIP_AMOUNT = int(os.environ.get("STX_DRIP_ATOMIC", "500000"))  # 0.5 STX = 500000 micro-STX
 
-USDC_ABI = [
-    {
-        "name": "transfer",
-        "type": "function",
-        "stateMutability": "nonpayable",
-        "inputs": [
-            {"name": "to", "type": "address"},
-            {"name": "amount", "type": "uint256"},
-        ],
-        "outputs": [{"name": "", "type": "bool"}],
-    },
-    {
-        "name": "balanceOf",
-        "type": "function",
-        "stateMutability": "view",
-        "inputs": [{"name": "account", "type": "address"}],
-        "outputs": [{"name": "", "type": "uint256"}],
-    },
-]
+SUBPROCESS_TIMEOUT = int(os.environ.get("STACKS_TX_TIMEOUT_SECONDS", "60"))
 
 
-def drip_sfuel_to_burner(w3: Web3, burner_address: str) -> None:
+# ── XOR decryption using sha256 (Stacks-compatible) ───────────────────────────
+# Mirrors frontend encryptPrivateKey() in useBurnerwallet.ts
+def _decrypt_burner_key(encrypted_hex: str, owner_principal: str) -> str:
     """
-    Fund the burner with sFUEL from a master wallet, if configured.
-    On SKALE, gasPrice=0 means sFUEL isn't strictly required for USDC
-    transfers, but some nodes may still require a non-zero balance.
+    XOR decrypt the burner private key.
+    key = sha256(ownerPrincipal.lower())
     """
-    master_key = os.getenv("MASTER_PRIVATE_KEY")
-    if not master_key:
-        logger.debug("[X402] No MASTER_PRIVATE_KEY — skipping sFUEL drip.")
-        return
-
-    try:
-        balance = w3.eth.get_balance(w3.to_checksum_address(burner_address))
-        if balance > Web3.to_wei(0.0005, "ether"):
-            logger.debug("[X402] Burner already has sFUEL — skipping drip.")
-            return
-
-        master_account = Account.from_key(master_key)
-        nonce = w3.eth.get_transaction_count(master_account.address)
-        tx = {
-            "nonce":    nonce,
-            "to":       w3.to_checksum_address(burner_address),
-            "value":    Web3.to_wei(0.001, "ether"),
-            "gas":      21_000,
-            "gasPrice": 0,          # SKALE is gasless
-            "chainId":  SKALE_CHAIN_ID,
-        }
-        signed = w3.eth.account.sign_transaction(tx, master_key)
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-        logger.info("[X402] sFUEL drip tx: %s", tx_hash.hex())
-    except Exception as exc:
-        logger.warning("[X402] sFUEL drip failed (non-fatal): %s", exc)
-
-
-def _decrypt_burner_key(encrypted_hex: str, owner_address: str) -> str:
-    """
-    XOR decryption — mirrors frontend encryptPrivateKey() in useBurnerwallet.ts.
-    key = keccak256(ownerAddress.toLowerCase())
-    """
-    key_bytes = bytes.fromhex(
-        Web3.keccak(text=owner_address.lower()).hex()[2:]
-    )
+    key_bytes = hashlib.sha256(owner_principal.lower().encode()).digest()
     enc_str = encrypted_hex[2:] if encrypted_hex.startswith("0x") else encrypted_hex
     enc_bytes = bytes.fromhex(enc_str)
     decrypted = bytes(
         b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(enc_bytes)
     )
-    return "0x" + decrypted.hex()
+    return decrypted.hex()
+
+
+def _get_token_config(funding_asset: str) -> tuple[str, str, int]:
+    """Returns (contractAddress, contractName, decimals) for the given asset."""
+    if funding_asset == "sBTC":
+        return SBTC_CONTRACT_ADDRESS, SBTC_CONTRACT_NAME, 8
+    # Default: USDCx
+    return USDCX_CONTRACT_ADDRESS, USDCX_CONTRACT_NAME, 6
+
+
+def drip_stx_to_burner(burner_address: str) -> None:
+    """
+    Send STX from the master wallet to the burner so it can pay tx fees.
+    
+    Unlike SKALE (gasless), Stacks requires STX for every transaction.
+    The master backend wallet must hold testnet STX (from faucet.stacks.co).
+    
+    This drips 0.5 STX to cover ~5 SIP-010 transfer fees.
+    """
+    if not MASTER_STACKS_PRIVATE_KEY or not MASTER_STACKS_ADDRESS:
+        logger.debug("[X402] No MASTER_STACKS_PRIVATE_KEY — skipping STX drip.")
+        return
+
+    try:
+        payload = json.dumps({
+            "burnerPrivateKey": MASTER_STACKS_PRIVATE_KEY,
+            "recipientAddress": burner_address,
+            "amountAtomic": STX_DRIP_AMOUNT,
+            "contractAddress": "",      # empty = STX transfer, not SIP-010
+            "contractName": "stx-transfer",
+            "network": STACKS_NETWORK,
+            "isStxTransfer": True,
+        })
+
+        result = subprocess.run(
+            ["node", STACKS_TX_BUILDER_PATH, payload],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+
+        if result.returncode == 0:
+            data = json.loads(result.stdout.strip())
+            logger.info("[X402] STX drip tx: %s", data.get("txId", "unknown"))
+        else:
+            logger.warning("[X402] STX drip failed (non-fatal): %s", result.stderr)
+
+    except Exception as exc:
+        logger.warning("[X402] STX drip failed (non-fatal): %s", exc)
+
+
+def _call_stacks_tx_builder(payload: dict) -> dict:
+    """
+    Calls the Node.js stacks_tx_builder.js subprocess.
+    Returns parsed JSON result dict.
+    Raises ValueError on failure.
+    """
+    payload_json = json.dumps(payload)
+
+    try:
+        result = subprocess.run(
+            ["node", STACKS_TX_BUILDER_PATH, payload_json],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise ValueError(
+            f"Stacks transaction timed out after {SUBPROCESS_TIMEOUT}s. "
+            "The Stacks node may be congested. Try again."
+        )
+    except FileNotFoundError:
+        raise ValueError(
+            f"stacks_tx_builder.js not found at {STACKS_TX_BUILDER_PATH}. "
+            "Run: cd server/tool && npx tsc stacks_tx_builder.ts"
+        )
+
+    if result.returncode != 0:
+        stderr_msg = result.stderr.strip()[:500]
+        raise ValueError(f"stacks_tx_builder failed (exit {result.returncode}): {stderr_msg}")
+
+    stdout = result.stdout.strip()
+    if not stdout:
+        raise ValueError("stacks_tx_builder returned empty output.")
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        raise ValueError(f"stacks_tx_builder returned invalid JSON: {stdout[:200]}")
+
+    if not data.get("success"):
+        raise ValueError(f"stacks_tx_builder error: {data.get('error', 'unknown error')}")
+
+    return data
 
 
 class X402SettlementTool:
     name = "x402_settlement"
     description = (
-        "Autonomous settlement via Burner EOA on SKALE. "
-        "Uses standard eth_sendRawTransaction with gasPrice=0 (SKALE is gasless). "
-        "No ERC-4337, no Bundler, no MetaMask popup."
+        "Autonomous settlement via Stacks burner principal. "
+        "Transfers SIP-010 tokens (USDCx or sBTC) to merchant Stacks principals. "
+        "Requires STX for transaction fees (unlike SKALE which was gasless)."
     )
 
     async def run_async(
@@ -141,16 +206,15 @@ class X402SettlementTool:
         if not merchants:
             raise ValueError("cart_mandate.merchants is empty.")
 
-        # ── Retrieve the burner wallet record ──────────────────────────────────
+        # ── Retrieve burner wallet record ─────────────────────────────────────
         db = await get_db()
-        import datetime
 
         burner_record = None
         if chat_id:
             try:
                 burner_record = await db.smartwallet.find_first(
                     where={
-                        "chatId":    chat_id,
+                        "chatId": chat_id,
                         "expiresAt": {"gt": datetime.datetime.utcnow()},
                     }
                 )
@@ -166,20 +230,21 @@ class X402SettlementTool:
         if burner_record is None:
             raise ValueError(
                 "No active burner wallet session. "
-                "Visit /wallet to deposit USDC and authorize the agent."
+                "Visit /wallet to deposit USDCx and authorize the agent."
             )
 
-        burner_address   = burner_record.smartWalletAddress
-        owner_eoa        = burner_record.ownerEoa
+        burner_address = burner_record.smartWalletAddress  # Stacks principal
+        owner_principal = burner_record.ownerEoa           # Stacks principal in ownerEoa field
         spend_limit_usdc = float(burner_record.spendLimitUsdc or DEFAULT_SPEND_LIMIT)
 
-        # Parse cart total (stored as USD float, not 6-decimal atomic)
+        # Detect funding asset from stored record (defaults to USDCx)
+        funding_asset = getattr(burner_record, "fundingAsset", "USDCx") or "USDCx"
+
         total_cart_raw = float(
             cart_mandate.get("amount")
             or cart_mandate.get("total_budget_amount")
             or 0
         )
-        # Guard against accidentally stored 6-decimal atomic values
         total_cart_usd = (
             total_cart_raw if total_cart_raw < 10_000 else total_cart_raw / 1_000_000
         )
@@ -187,145 +252,104 @@ class X402SettlementTool:
         if total_cart_usd > spend_limit_usdc:
             raise ValueError(
                 f"Cart total ${total_cart_usd:.2f} exceeds your burner wallet "
-                f"balance of ${spend_limit_usdc:.2f} USDC. "
+                f"balance of ${spend_limit_usdc:.2f}. "
                 f"Visit /wallet and top up to continue."
             )
 
         logger.info(
-            "[X402] Burner: %s | funded: $%.2f | cart: $%.2f | vendors: %d",
-            burner_address[:12], spend_limit_usdc, total_cart_usd, len(merchants),
+            "[X402] Stacks burner: %s | funded: $%.2f | cart: $%.2f | asset: %s | vendors: %d",
+            burner_address[:16], spend_limit_usdc, total_cart_usd, funding_asset, len(merchants),
         )
 
-        # ── Decrypt the burner private key ─────────────────────────────────────
+        # ── Decrypt burner private key ────────────────────────────────────────
         burner_private_key = _decrypt_burner_key(
             burner_record.sessionKeyEncryptedPrivate,
-            owner_eoa,
+            owner_principal,
         )
-        burner_account = Web3().eth.account.from_key(burner_private_key)
-        logger.info("[X402] Burner account recovered: %s", burner_account.address[:12])
+        logger.info("[X402] Burner key decrypted for principal: %s", burner_address[:16])
 
-        # ── Connect to SKALE RPC ───────────────────────────────────────────────
-        w3 = Web3(
-            Web3.HTTPProvider(
-                SKALE_RPC_URL,
-                request_kwargs={"timeout": RPC_TIMEOUT},
-            )
-        )
-        if not w3.is_connected():
-            raise ConnectionError(
-                f"Cannot connect to SKALE RPC: {SKALE_RPC_URL} (timeout={RPC_TIMEOUT}s)"
-            )
+        # ── Optionally drip STX to burner for fees ────────────────────────────
+        # Unlike SKALE (gasless), Stacks requires STX for tx fees.
+        drip_stx_to_burner(burner_address)
 
-        # ── Optionally drip sFUEL ──────────────────────────────────────────────
-        drip_sfuel_to_burner(w3, burner_account.address)
+        # ── Get SIP-010 contract config ───────────────────────────────────────
+        contract_address, contract_name, decimals = _get_token_config(funding_asset)
 
-        # ── Verify burner USDC balance on-chain BEFORE settling ────────────────
-        usdc_contract = w3.eth.contract(
-            address=w3.to_checksum_address(USDC_CONTRACT),
-            abi=USDC_ABI,
-        )
-        burner_usdc_balance_atomic = usdc_contract.functions.balanceOf(
-            w3.to_checksum_address(burner_account.address)
-        ).call()
-        burner_usdc_balance_usd = burner_usdc_balance_atomic / 1_000_000
-
-        logger.info(
-            "[X402] On-chain USDC balance: $%.6f (need $%.2f)",
-            burner_usdc_balance_usd, total_cart_usd,
-        )
-
-        if burner_usdc_balance_atomic == 0:
-            raise ValueError(
-                f"Burner wallet {burner_account.address[:10]}… has 0 USDC on SKALE. "
-                f"The funding transaction may have used the wrong network or USDC contract. "
-                f"Expected USDC contract: {USDC_CONTRACT}. "
-                f"Visit /wallet to create a new session and ensure MetaMask is on SKALE."
-            )
-
-        if burner_usdc_balance_usd < total_cart_usd:
-            raise ValueError(
-                f"Burner wallet only has ${burner_usdc_balance_usd:.2f} USDC on SKALE "
-                f"but cart total is ${total_cart_usd:.2f}. "
-                f"Visit /wallet to top up."
-            )
-
-        # ── Settle each vendor ─────────────────────────────────────────────────
+        # ── Settle each vendor ────────────────────────────────────────────────
         receipts: list[dict] = []
         failures: list[dict] = []
-        total_usd: Decimal   = Decimal("0")
+        total_usd: Decimal = Decimal("0")
 
         for i, vendor in enumerate(merchants):
-            vendor_address = w3.to_checksum_address(vendor["merchant_address"])
+            vendor_principal = vendor.get("merchant_address", "")
             raw_val = vendor.get("amount", 0)
             usd_amt = float(raw_val) if float(raw_val) < 10_000 else float(raw_val) / 1_000_000
-            usdc_atomic = int(usd_amt * 1_000_000)
+            amount_atomic = int(usd_amt * (10 ** decimals))
 
             logger.info(
-                "[X402] Vendor %d/%d: %s — $%.2f (%d atomic USDC)",
-                i + 1, len(merchants), vendor.get("name"), usd_amt, usdc_atomic,
+                "[X402] Vendor %d/%d: %s — $%.2f (%d atomic %s)",
+                i + 1, len(merchants), vendor.get("name"), usd_amt, amount_atomic, funding_asset,
             )
 
-            try:
-                nonce = w3.eth.get_transaction_count(burner_account.address)
-
-                # Build tx — gasPrice=0 because SKALE is completely gasless
-                transaction = usdc_contract.functions.transfer(
-                    vendor_address,
-                    usdc_atomic,
-                ).build_transaction({
-                    "chainId":  SKALE_CHAIN_ID,
-                    "gas":      100_000,
-                    "gasPrice": 0,      # ← SKALE is gasless; w3.eth.gas_price may lie
-                    "nonce":    nonce,
-                })
-
-                signed_tx = w3.eth.account.sign_transaction(
-                    transaction, private_key=burner_private_key
+            if not vendor_principal or not vendor_principal.startswith("S"):
+                failure_msg = (
+                    f"Invalid Stacks principal: '{vendor_principal}'. "
+                    "Merchant must have a valid Stacks address (starts with S)."
                 )
-                tx_hash     = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-                tx_hash_hex = "0x" + tx_hash.hex().lstrip("0x")
+                logger.error("[X402] ✗ %s failed: %s", vendor.get("name"), failure_msg)
+                failures.append({
+                    "commodity": vendor.get("name", "Unknown"),
+                    "amount_usd": usd_amt,
+                    "error": failure_msg,
+                })
+                continue
 
-                logger.info("[X402] ✓ %s — tx: %s", vendor.get("name"), tx_hash_hex)
+            try:
+                # Call Node.js builder via subprocess
+                tx_payload = {
+                    "burnerPrivateKey": burner_private_key,
+                    "recipientAddress": vendor_principal,
+                    "amountAtomic": amount_atomic,
+                    "contractAddress": contract_address,
+                    "contractName": contract_name,
+                    "network": STACKS_NETWORK,
+                }
 
-                # Wait for receipt
-                try:
-                    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
-                    if receipt.status == 0:
-                        raise ValueError("Transaction reverted on-chain")
-                    confirmed_hash = "0x" + receipt.transactionHash.hex().lstrip("0x")
-                except Exception as wait_exc:
-                    logger.warning(
-                        "[X402] Receipt wait failed for %s: %s — using submitted tx_hash",
-                        vendor.get("name"), wait_exc,
-                    )
-                    confirmed_hash = tx_hash_hex
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, _call_stacks_tx_builder, tx_payload
+                )
 
-                item_usd   = Decimal(str(usd_amt))
+                tx_id = result.get("txId") or result.get("txHash", "unknown")
+                logger.info("[X402] ✓ %s — txid: %s", vendor.get("name"), tx_id)
+
+                item_usd = Decimal(str(usd_amt))
                 total_usd += item_usd
 
                 receipts.append({
-                    "commodity":        vendor.get("name", "Unknown"),
-                    "merchant_address": vendor_address,
-                    "amount_usd":       float(item_usd),
-                    "tx_hash":          confirmed_hash,
-                    "product_id":       (vendor.get("products") or [{}])[0].get("product_id"),
-                    "vendor_id":        vendor.get("vendor_id"),
+                    "commodity": vendor.get("name", "Unknown"),
+                    "merchant_address": vendor_principal,
+                    "amount_usd": float(item_usd),
+                    "tx_hash": tx_id,
+                    "product_id": (vendor.get("products") or [{}])[0].get("product_id"),
+                    "vendor_id": vendor.get("vendor_id"),
+                    "network": f"Stacks {STACKS_NETWORK.capitalize()}",
+                    "asset": funding_asset,
                 })
 
             except Exception as exc:
                 error_detail = str(exc)
                 logger.error("[X402] ✗ %s failed: %s", vendor.get("name"), error_detail)
                 failures.append({
-                    "commodity":  vendor.get("name", "Unknown"),
+                    "commodity": vendor.get("name", "Unknown"),
                     "amount_usd": usd_amt,
-                    "error":      error_detail,
+                    "error": error_detail,
                 })
 
         if not receipts and failures:
             all_errors = "; ".join(f["error"] for f in failures)
             raise ValueError(f"All payments failed: {all_errors}")
 
-        # ── Record order in DB ─────────────────────────────────────────────────
+        # ── Record order in DB ────────────────────────────────────────────────
         if receipts:
             try:
                 await self._record_order(
@@ -339,34 +363,35 @@ class X402SettlementTool:
 
         status = "settled" if not failures else "partial"
         logger.info(
-            "[X402] Done — %d confirmed, %d failed, $%.2f total",
-            len(receipts), len(failures), total_usd,
+            "[X402] Done — %d confirmed, %d failed, $%.2f total %s",
+            len(receipts), len(failures), total_usd, funding_asset,
         )
 
         return {
-            "status":   status,
+            "status": status,
             "receipts": receipts,
             "failures": failures,
-            "network":  "SKALE Base Sepolia",
+            "network": f"Stacks {STACKS_NETWORK.capitalize()}",
+            "asset": funding_asset,
             "details": (
                 f"Settled {len(receipts)}/{len(receipts) + len(failures)} vendor(s) · "
-                f"${float(total_usd):.2f} USDC"
+                f"${float(total_usd):.2f} {funding_asset}"
             ),
         }
 
     async def _record_order(
         self,
-        receipts:   list[dict],
-        total_usd:  Decimal,
+        receipts: list[dict],
+        total_usd: Decimal,
         user_wallet: str,
-        primary_tx:  str,
+        primary_tx: str,
     ) -> None:
-        db    = await get_db()
+        db = await get_db()
         order = await db.order.create(data={
             "totalAmount": total_usd,
-            "status":      "PAID",
-            "txHash":      primary_tx,
-            "userWallet":  user_wallet,
+            "status": "PAID",
+            "txHash": primary_tx,
+            "userWallet": user_wallet,
         })
         for receipt in receipts:
             product = None
@@ -385,9 +410,9 @@ class X402SettlementTool:
             if product is None:
                 continue
             await db.orderitem.create(data={
-                "orderId":   order.id,
+                "orderId": order.id,
                 "productId": product.id,
-                "vendorId":  product.vendorId,
-                "quantity":  1,
-                "price":     Decimal(str(receipt["amount_usd"])),
+                "vendorId": product.vendorId,
+                "quantity": 1,
+                "price": Decimal(str(receipt["amount_usd"])),
             })

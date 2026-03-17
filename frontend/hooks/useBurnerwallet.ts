@@ -1,144 +1,67 @@
 /**
  * hooks/useBurnerWallet.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Fixed version:
- *   - Uses SKALE Base Sepolia chain for ALL operations (funding + settlement)
- *   - Uses the USDC contract deployed on SKALE Base Sepolia (not Ethereum Sepolia)
- *   - Switches MetaMask to SKALE network before sending the funding tx
- *   - Uses http() transport for publicClient (not custom — avoids MetaMask for reads)
- *   - Verifies USDC balance on the burner address after transfer confirms
+ * Stacks blockchain edition (migrated from SKALE/EVM).
+ * 
+ * Uses @stacks/transactions and @stacks/connect to:
+ * 1. Generate a Stacks burner principal
+ * 2. Fund it with USDCx or sBTC via Leather/Xverse wallet
+ * 3. Save the encrypted key to the backend
+ * 
+ * XOR encryption key uses sha256(stacksPrincipal) instead of keccak256(eoa).
  */
 
 "use client";
 
 import { useState, useCallback } from "react";
 import {
-  createWalletClient,
-  createPublicClient,
-  http,
-  custom,
-  encodeFunctionData,
-  parseUnits,
-  keccak256,
-  toBytes,
-  toHex,
-  type Address,
-  type Chain,
-} from "viem";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+  makeRandomPrivKey,
+  getAddressFromPrivateKey,
+  standardPrincipalCV,
+  uintCV,
+  noneCV,
+} from "@stacks/transactions";
+import { openContractCall } from "@stacks/connect";
+import { STACKS_TESTNET } from "@stacks/network";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
-// ── SKALE Base Sepolia chain definition ───────────────────────────────────────
-// chainId 324705682 = 0x135A9D92 (matches header.tsx)
-export const skaleBaseSepolia: Chain = {
-  id: 324705682,
-  name: "SKALE Base Sepolia Testnet",
-  nativeCurrency: { name: "SKALE Credits", symbol: "CREDIT", decimals: 18 },
-  rpcUrls: {
-    default: {
-      http: ["https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha"],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: "SKALE Explorer",
-      url: "https://base-sepolia-testnet-explorer.skalenodes.com",
-    },
-  },
-} as const;
+// ── Stacks Testnet config ─────────────────────────────────────────────────────
 
-// ── USDC on SKALE Base Sepolia ────────────────────────────────────────────────
-// IMPORTANT: This is NOT the Ethereum Sepolia USDC address.
-// SKALE has its own bridged USDC deployment. This must match
-// USDC_CONTRACT in server/tool/x402_settlement.py.
-//
-// To find the correct address:
-//   1. Check https://base-sepolia-testnet-explorer.skalenodes.com for USDC token
-//   2. Or ask the SKALE team / check their docs for the canonical USDC address
-//   3. Update BOTH this constant AND server/tool/x402_settlement.py to match
-//
-// Common SKALE Hub USDC address (verify against your specific SKALE chain):
-const USDC_CONTRACT_ADDRESS: Address = "0x5425890298aed601595a70AB815c96711a31Bc65";
+// ── USDCx SIP-010 contract on Stacks Testnet ──────────────────────────────────
+// Replace with actual deployed USDCx contract address for testnet
+const USDCX_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_USDCX_CONTRACT_ADDRESS || "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+const USDCX_CONTRACT_NAME = "usdcx-token";
 
-// Minimal ERC-20 ABI — only what we need
-const ERC20_ABI = [
-  {
-    name: "transfer",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "to", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-  {
-    name: "balanceOf",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-] as const;
+// ── sBTC SIP-010 contract on Stacks Testnet ────────────────────────────────────
+const SBTC_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_SBTC_CONTRACT_ADDRESS || "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+const SBTC_CONTRACT_NAME = "sbtc-token";
+
+export type FundingAsset = "USDCx" | "sBTC";
 
 export interface BurnerWalletInfo {
-  burnerAddress: Address;
-  ownerEoa: Address;
+  burnerAddress: string;   // Stacks principal e.g. ST...
+  ownerPrincipal: string;  // Connected Stacks wallet principal
   fundedAmount: number;
+  fundingAsset: FundingAsset;
   expiresAt: Date;
 }
 
 export type BurnerWalletStatus =
   | "idle"
-  | "switching_network"
   | "generating"
   | "funding"
-  | "confirming"
-  | "verifying"
   | "saving"
   | "ready"
   | "error";
 
-// ── XOR encryption (mirrors server/tool/x402_settlement.py _decrypt_burner_key) ─
-function encryptPrivateKey(privateKey: string, ownerAddress: string): string {
-  const keyHex = keccak256(toBytes(ownerAddress.toLowerCase()));
-  const pkBytes = toBytes(privateKey as `0x${string}`);
-  const keyBytes = toBytes(keyHex);
-  const encrypted = pkBytes.map((b, i) => b ^ keyBytes[i % keyBytes.length]);
-  return toHex(new Uint8Array(encrypted));
-}
-
-// ── Switch MetaMask to SKALE network ─────────────────────────────────────────
-async function switchToSkale(): Promise<void> {
-  if (typeof window === "undefined" || !window.ethereum) {
-    throw new Error("MetaMask is not installed.");
-  }
-
-  const requiredChainId = "0x" + skaleBaseSepolia.id.toString(16).toUpperCase();
-
-  try {
-    await window.ethereum.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: requiredChainId }],
-    });
-  } catch (switchError: any) {
-    // 4902 = chain not added yet
-    if (switchError?.code === 4902) {
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: requiredChainId,
-            chainName: skaleBaseSepolia.name,
-            rpcUrls: [skaleBaseSepolia.rpcUrls.default.http[0]],
-            nativeCurrency: skaleBaseSepolia.nativeCurrency,
-            blockExplorerUrls: [skaleBaseSepolia.blockExplorers?.default.url],
-          },
-        ],
-      });
-    } else {
-      throw switchError;
-    }
-  }
+// ── XOR encryption using sha256 (Stacks-compatible) ──────────────────────────
+// Mirrors the server-side decryption in stacks_tx_builder.ts
+function encryptPrivateKey(privateKey: string, ownerPrincipal: string): string {
+  const keyBytes = sha256(new TextEncoder().encode(ownerPrincipal.toLowerCase()));
+  const pkBytes = hexToBytes(privateKey.startsWith("0x") ? privateKey.slice(2) : privateKey);
+  const encrypted = pkBytes.map((b: number, i: number) => b ^ keyBytes[i % keyBytes.length]);
+  return "0x" + bytesToHex(new Uint8Array(encrypted));
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -151,137 +74,76 @@ export function useBurnerWallet() {
     async ({
       fundAmountUsdc = 100,
       sessionDurationHours = 24,
+      fundingAsset = "USDCx" as FundingAsset,
+      ownerStacksAddress,
     }: {
       fundAmountUsdc?: number;
       sessionDurationHours?: number;
-    } = {}): Promise<BurnerWalletInfo> => {
-      if (typeof window === "undefined" || !window.ethereum) {
-        throw new Error("MetaMask is not installed.");
-      }
-
+      fundingAsset?: FundingAsset;
+      ownerStacksAddress: string; // Must be passed from connected Leather/Xverse wallet
+    }): Promise<BurnerWalletInfo> => {
       setError(null);
 
       try {
-        // ── Step 1: Switch MetaMask to SKALE ────────────────────────────────
-        setStatus("switching_network");
-        await switchToSkale();
-
-        // ── Step 2: Generate burner EOA ──────────────────────────────────────
+        // ── Step 1: Generate Stacks burner key & address ─────────────────────
         setStatus("generating");
-        const burnerPrivateKey = generatePrivateKey();
-        const burnerAccount = privateKeyToAccount(burnerPrivateKey);
-        const burnerAddress = burnerAccount.address;
+        const burnerPrivKey = makeRandomPrivKey();
+        const burnerPrivKeyHex = burnerPrivKey.toString();
+        const burnerAddress = getAddressFromPrivateKey(
+          burnerPrivKeyHex,
+          STACKS_TESTNET
+        );
 
-        console.log("[BurnerWallet] Generated burner address:", burnerAddress);
+        console.log("[BurnerWallet] Generated Stacks burner principal:", burnerAddress);
 
-        // ── Step 3: Create wallet client connected to SKALE ──────────────────
-        const walletClient = createWalletClient({
-          chain: skaleBaseSepolia,
-          transport: custom(window.ethereum),
-        });
-
-        // publicClient uses HTTP directly — no MetaMask needed for reads
-        const publicClient = createPublicClient({
-          chain: skaleBaseSepolia,
-          transport: http(skaleBaseSepolia.rpcUrls.default.http[0]),
-        });
-
-        const [ownerEoa] = await walletClient.requestAddresses();
-        console.log("[BurnerWallet] Owner EOA:", ownerEoa);
-
-        // ── Step 4: Check owner's USDC balance on SKALE ──────────────────────
+        // ── Step 2: Fund burner via openContractCall (Leather/Xverse popup) ──
         setStatus("funding");
-        const ownerUsdcBalance = await publicClient.readContract({
-          address: USDC_CONTRACT_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [ownerEoa],
+
+        // Amount in token's smallest unit (USDCx = 6 decimals, sBTC = 8 decimals)
+        const decimals = fundingAsset === "USDCx" ? 6 : 8;
+        const fundAmountAtomic = Math.floor(fundAmountUsdc * Math.pow(10, decimals));
+
+        const contractAddress = fundingAsset === "USDCx" ? USDCX_CONTRACT_ADDRESS : SBTC_CONTRACT_ADDRESS;
+        const contractName = fundingAsset === "USDCx" ? USDCX_CONTRACT_NAME : SBTC_CONTRACT_NAME;
+
+        await new Promise<void>((resolve, reject) => {
+          openContractCall({
+            contractAddress,
+            contractName,
+            functionName: "transfer",
+            functionArgs: [
+              uintCV(fundAmountAtomic),               // amount
+              standardPrincipalCV(ownerStacksAddress), // sender
+              standardPrincipalCV(burnerAddress),      // recipient
+              noneCV(),                                // memo (optional)
+            ],
+            network: STACKS_TESTNET,
+            onFinish: (data) => {
+              console.log("[BurnerWallet] Transfer tx broadcasted:", data.txId);
+              resolve();
+            },
+            onCancel: () => {
+              reject(new Error("User cancelled the funding transaction."));
+            },
+          });
         });
 
-        const requiredAtomic = parseUnits(fundAmountUsdc.toString(), 6);
-        console.log(
-          "[BurnerWallet] Owner USDC balance (atomic):",
-          ownerUsdcBalance.toString(),
-          "Required:",
-          requiredAtomic.toString()
-        );
-
-        if (ownerUsdcBalance < requiredAtomic) {
-          const ownerBalanceFormatted = (Number(ownerUsdcBalance) / 1e6).toFixed(2);
-          throw new Error(
-            `Insufficient USDC on SKALE. You have $${ownerBalanceFormatted} USDC on SKALE Base Sepolia ` +
-            `but need $${fundAmountUsdc.toFixed(2)}. ` +
-            `Please bridge USDC to SKALE Base Sepolia first.`
-          );
-        }
-
-        // ── Step 5: Send USDC transfer to burner on SKALE ────────────────────
-        console.log(
-          `[BurnerWallet] Sending $${fundAmountUsdc} USDC to burner on SKALE...`
-        );
-
-        const txHash = await walletClient.writeContract({
-          address: USDC_CONTRACT_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "transfer",
-          args: [burnerAddress, requiredAtomic],
-          account: ownerEoa,
-          chain: skaleBaseSepolia,
-        });
-
-        console.log("[BurnerWallet] Transfer tx submitted:", txHash);
-
-        // ── Step 6: Wait for confirmation ────────────────────────────────────
-        setStatus("confirming");
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash: txHash,
-          timeout: 60_000, // 60 seconds
-        });
-
-        if (receipt.status !== "success") {
-          throw new Error(
-            "USDC transfer transaction was reverted. Check the SKALE explorer for details."
-          );
-        }
-
-        console.log("[BurnerWallet] Transfer confirmed in block:", receipt.blockNumber);
-
-        // ── Step 7: Verify burner received the USDC ──────────────────────────
-        setStatus("verifying");
-        const burnerBalance = await publicClient.readContract({
-          address: USDC_CONTRACT_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [burnerAddress],
-        });
-
-        const burnerBalanceUsd = Number(burnerBalance) / 1e6;
-        console.log(
-          "[BurnerWallet] Burner USDC balance after transfer: $" +
-          burnerBalanceUsd.toFixed(6)
-        );
-
-        if (burnerBalance === 0n) {
-          throw new Error(
-            "Transfer appeared to succeed but burner USDC balance is 0. " +
-            `Check that USDC contract ${USDC_CONTRACT_ADDRESS} is correct for SKALE Base Sepolia.`
-          );
-        }
-
-        // ── Step 8: Save to backend ───────────────────────────────────────────
+        // ── Step 3: Save encrypted key to backend ────────────────────────────
         setStatus("saving");
         const expiresAt = new Date(
           Date.now() + sessionDurationHours * 60 * 60 * 1000
         );
-        const encryptedKey = encryptPrivateKey(burnerPrivateKey, ownerEoa);
+
+        const encryptedKey = encryptPrivateKey(burnerPrivKeyHex, ownerStacksAddress);
 
         const savePayload = {
-          smartWalletAddress:         burnerAddress,
-          sessionKeyPublic:           burnerAddress,
+          smartWalletAddress: burnerAddress,       // Stacks principal as "address"
+          sessionKeyPublic: burnerAddress,
           sessionKeyEncryptedPrivate: encryptedKey,
-          spendLimitUsdc:             burnerBalanceUsd, // Use actual on-chain balance
-          expiresAt:                  expiresAt.toISOString(),
-          ownerEoa:                   ownerEoa,
+          spendLimitUsdc: fundAmountUsdc,
+          expiresAt: expiresAt.toISOString(),
+          ownerEoa: ownerStacksAddress,            // Stacks principal stored in ownerEoa field
+          fundingAsset,
         };
 
         const res = await fetch("/api/wallet/session-key", {
@@ -293,14 +155,15 @@ export function useBurnerWallet() {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(
-            `Failed to save burner wallet to backend: ${errData.error || res.statusText}`
+            `Failed to save burner wallet: ${errData.error || res.statusText}`
           );
         }
 
         const info: BurnerWalletInfo = {
           burnerAddress,
-          ownerEoa,
-          fundedAmount: burnerBalanceUsd,
+          ownerPrincipal: ownerStacksAddress,
+          fundedAmount: fundAmountUsdc,
+          fundingAsset,
           expiresAt,
         };
         setWalletInfo(info);
@@ -326,9 +189,10 @@ export function useBurnerWallet() {
         const expiresAt = new Date(data.data.expiresAt);
         if (expiresAt < new Date()) return null;
         const info: BurnerWalletInfo = {
-          burnerAddress: data.data.smartWalletAddress as Address,
-          ownerEoa:      data.data.ownerEoa as Address,
-          fundedAmount:  parseFloat(data.data.spendLimitUsdc),
+          burnerAddress: data.data.smartWalletAddress,
+          ownerPrincipal: data.data.ownerEoa,
+          fundedAmount: parseFloat(data.data.spendLimitUsdc),
+          fundingAsset: (data.data.fundingAsset as FundingAsset) || "USDCx",
           expiresAt,
         };
         setWalletInfo(info);

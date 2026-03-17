@@ -1,21 +1,40 @@
 "use client";
 
 /**
- * components/header.tsx — Cart Blanche top navigation with Google OAuth
+ * components/header.tsx — Cart Blanche top navigation with Stacks Wallet
+ * 
+ * Migrated from MetaMask/EVM to Leather/Xverse (Stacks Bitcoin L2).
+ * Uses @stacks/connect showConnect() instead of window.ethereum.
  */
 
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
-// ...existing code...
-import { useMetaMask } from "@/hooks/use-metamask";
-import { useState, useRef, useEffect } from "react";
-import { LogOut, User, ChevronDown, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { LogOut, User, ChevronDown, Loader2, Wallet } from "lucide-react";
+import { connect } from "@stacks/connect";
+import { useConnect } from "@stacks/connect-react";
+import { UserSession, AppConfig } from "@stacks/auth";
+
+// Stacks app config
+const appConfig = new AppConfig(["store_write", "publish_data"]);
+const userSession = new UserSession({ appConfig });
 
 export default function Header() {
-  const { connect, address } = useMetaMask();
   const { data: session, status } = useSession();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Stacks wallet state
+  const [stacksAddress, setStacksAddress] = useState<string | null>(null);
+
+  // Check for existing Stacks session on mount
+  useEffect(() => {
+    if (userSession.isUserSignedIn()) {
+      const userData = userSession.loadUserData();
+      const addr = userData?.profile?.stxAddress?.testnet;
+      if (addr) setStacksAddress(addr);
+    }
+  }, []);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -27,26 +46,19 @@ export default function Header() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleConnectWallet = async () => {
-    try {
-      if (typeof window !== "undefined" && window.ethereum) {
-        const requiredChainId = "0x135A9D92";
-        try {
-          await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: requiredChainId }] });
-        } catch (switchError: any) {
-          if (switchError.code === 4902) {
-            await window.ethereum.request({
-              method: "wallet_addEthereumChain",
-              params: [{ chainId: requiredChainId, chainName: "SKALE Base Sepolia Testnet", rpcUrls: ["https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha/"], nativeCurrency: { name: "SKALE Credits", symbol: "CREDIT", decimals: 18 }, blockExplorerUrls: ["https://base-sepolia-testnet-explorer.skalenodes.com"] }],
-            });
-          }
-        }
+  const connectStacksWallet = useCallback(() => {
+    connect().then(result => {
+      // result may contain addresses or session info
+      if (result && result.addresses && result.addresses.stx) {
+        setStacksAddress(result.addresses.stx[0]);
       }
-      await connect();
-    } catch (error) {
-      console.error("Failed to connect wallet:", error);
-    }
-  };
+    });
+  }, []);
+
+  const disconnectStacksWallet = useCallback(() => {
+    userSession.signUserOut("/");
+    setStacksAddress(null);
+  }, []);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -66,19 +78,52 @@ export default function Header() {
         {/* Right side */}
         <div className="flex items-center gap-3">
 
-          {/* MetaMask wallet chip */}
-          {address ? (
-            <div style={{ borderRadius: 9999, background: "rgba(255,233,92,0.1)", padding: "6px 14px", fontSize: 13, color: "#ffe95c", border: "1px solid rgba(255,233,92,0.25)", fontFamily: "monospace", boxShadow: "0 0 8px rgba(255,233,92,0.25)" }}>
-              {address.slice(0, 6)}…{address.slice(-4)}
+          {/* Stacks wallet chip */}
+          {stacksAddress ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderRadius: 9999,
+                background: "rgba(255,233,92,0.1)",
+                padding: "6px 14px",
+                fontSize: 13,
+                color: "#ffe95c",
+                border: "1px solid rgba(255,233,92,0.25)",
+                fontFamily: "monospace",
+                boxShadow: "0 0 8px rgba(255,233,92,0.25)",
+                cursor: "pointer",
+              }}
+              onClick={disconnectStacksWallet}
+              title="Click to disconnect Stacks wallet"
+            >
+              <Wallet size={12} />
+              {stacksAddress.slice(0, 8)}…{stacksAddress.slice(-4)}
             </div>
           ) : (
             <button
-              onClick={handleConnectWallet}
-              style={{ borderRadius: 9999, background: "#ffe95c", padding: "6px 16px", fontSize: 13, fontWeight: 600, color: "#000", border: "1px solid rgba(255,233,92,0.4)", cursor: "pointer", boxShadow: "0 0 12px rgba(255,233,92,0.5)", transition: "all 0.2s" }}
+              onClick={connectStacksWallet}
+              style={{
+                borderRadius: 9999,
+                background: "#ffe95c",
+                padding: "6px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#000",
+                border: "1px solid rgba(255,233,92,0.4)",
+                cursor: "pointer",
+                boxShadow: "0 0 12px rgba(255,233,92,0.5)",
+                transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#fff7b2"; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "#ffe95c"; }}
             >
-              Connect MetaMask
+              <Wallet size={13} />
+              Connect Leather / Xverse
             </button>
           )}
 
@@ -145,7 +190,7 @@ export default function Header() {
           )}
         </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </header>
   );
 }

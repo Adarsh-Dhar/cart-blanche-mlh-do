@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * app/wallet/page.tsx — Stacks Blockchain Edition
+ * 
+ * Migrated from SKALE/EVM to Stacks Bitcoin L2.
+ * Users now connect Leather or Xverse wallet and fund a Stacks burner principal
+ * with USDCx or sBTC (SIP-010 tokens) instead of EVM USDC.
+ */
+
 import React, { useState, useEffect } from "react";
 import {
   Wallet,
@@ -14,8 +22,12 @@ import {
   Key,
   Cpu,
   Lock,
+  Bitcoin,
 } from "lucide-react";
-import { useBurnerWallet, type BurnerWalletInfo } from "@/hooks/useBurnerwallet";
+import { useBurnerWallet, type BurnerWalletInfo, type FundingAsset } from "@/hooks/useBurnerwallet";
+import { showConnect } from "@stacks/connect";
+import { STACKS_TESTNET } from "@stacks/network";
+
 
 function Card({
   children,
@@ -85,20 +97,46 @@ export default function WalletPage() {
 
   const [depositAmount, setDepositAmount] = useState("100");
   const [sessionHours, setSessionHours] = useState("24");
-  const [existingSession, setExistingSession] =
-    useState<BurnerWalletInfo | null>(null);
+  const [fundingAsset, setFundingAsset] = useState<FundingAsset>("USDCx");
+  const [existingSession, setExistingSession] = useState<BurnerWalletInfo | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Stacks wallet connection state
+  const [stacksAddress, setStacksAddress] = useState<string | null>(null);
 
   useEffect(() => {
     checkExistingSession().then((s) => setExistingSession(s));
   }, [checkExistingSession]);
 
+  const connectStacksWallet = () => {
+    showConnect({
+      appDetails: {
+        name: "Cart Blanche",
+        icon: "/favicon.ico",
+      },
+      redirectTo: "/wallet",
+      onFinish: (data: any) => {
+        const addr = data.userSession?.loadUserData?.()?.profile?.stxAddress?.testnet;
+        if (addr) {
+          setStacksAddress(addr);
+        }
+      },
+      userSession: undefined as any,
+    });
+  };
+
   const handleAuthorize = async () => {
     setActionError(null);
+    if (!stacksAddress) {
+      setActionError("Please connect your Stacks wallet (Leather or Xverse) first.");
+      return;
+    }
     try {
       const info = await authorizeShoppingAgent({
         fundAmountUsdc: parseFloat(depositAmount) || 100,
         sessionDurationHours: parseInt(sessionHours) || 24,
+        fundingAsset,
+        ownerStacksAddress: stacksAddress,
       });
       setExistingSession(info);
     } catch (err: any) {
@@ -110,12 +148,12 @@ export default function WalletPage() {
     status !== "idle" && status !== "ready" && status !== "error";
 
   const statusLabels: Record<string, string> = {
-    idle:       "Ready",
-    generating: "Generating burner wallet…",
-    funding:    "Depositing USDC (MetaMask)…",
-    saving:     "Saving wallet to backend…",
-    ready:      "Burner wallet authorized!",
-    error:      "Error",
+    idle: "Ready",
+    generating: "Generating Stacks burner principal…",
+    funding: "Depositing via Leather/Xverse wallet…",
+    saving: "Saving wallet to backend…",
+    ready: "Burner wallet authorized!",
+    error: "Error",
   };
 
   return (
@@ -163,8 +201,8 @@ export default function WalletPage() {
               marginBottom: 16,
             }}
           >
-            <Wallet size={12} />
-            Burner Wallet
+            <Bitcoin size={12} />
+            Stacks Burner Wallet
           </div>
           <h1
             style={{
@@ -193,11 +231,64 @@ export default function WalletPage() {
               maxWidth: 520,
             }}
           >
-            Deposit USDC into a temporary burner wallet. The shopping agent
-            settles purchases autonomously — no MetaMask popup per transaction,
-            no gas fees on SKALE.
+            Deposit USDCx or sBTC into a temporary Stacks burner principal via
+            your Leather or Xverse wallet. The shopping agent settles SIP-010
+            token purchases autonomously on the Stacks blockchain.
+          </p>
+          <p style={{ color: "#64748b", fontSize: 12, marginTop: 6 }}>
+            ⚠️ Unlike SKALE, Stacks requires STX for transaction fees. Your burner
+            principal will be dripped a small amount of STX automatically.
           </p>
         </div>
+
+        {/* Stacks Wallet Connection */}
+        {!stacksAddress ? (
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 16 }}>
+              Step 1: Connect Stacks Wallet
+            </div>
+            <p style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
+              Connect your Leather or Xverse wallet to fund the Stacks burner principal.
+            </p>
+            <button
+              onClick={connectStacksWallet}
+              style={{
+                width: "100%",
+                padding: "14px 24px",
+                background: "hsl(66,100%,50%)",
+                border: "none",
+                borderRadius: 12,
+                color: "#000",
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "'Syne', sans-serif",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                boxShadow: "0 0 32px hsl(66,100%,50%,0.3)",
+              }}
+            >
+              <Wallet size={16} />
+              Connect Leather / Xverse
+            </button>
+          </Card>
+        ) : (
+          <Card style={{ marginBottom: 20, borderColor: "hsl(66,100%,50%,0.3)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <CheckCircle2 size={18} color="hsl(66,100%,50%)" />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "hsl(66,100%,50%)" }}>
+                  Stacks Wallet Connected
+                </div>
+                <div style={{ fontSize: 11, color: "#4a5568", fontFamily: "monospace", marginTop: 2 }}>
+                  {stacksAddress}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* Active Session Banner */}
         {existingSession && (
@@ -215,26 +306,20 @@ export default function WalletPage() {
           >
             <CheckCircle2 size={18} color="hsl(66,100%,50%)" />
             <div style={{ flex: 1 }}>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: "hsl(66,100%,50%)",
-                }}
-              >
-                Active Burner Wallet
+              <div style={{ fontSize: 13, fontWeight: 700, color: "hsl(66,100%,50%)" }}>
+                Active Stacks Burner Wallet
               </div>
-              <div
-                style={{ fontSize: 11, color: "#4a5568", marginTop: 2 }}>
-                Funded: ${existingSession.fundedAmount} USDC · Expires: {" "}
-                {existingSession.expiresAt.toLocaleString()} · Address: {" "}
-                {existingSession.burnerAddress ? existingSession.burnerAddress.slice(0, 10) : "N/A"}…
+              <div style={{ fontSize: 11, color: "#4a5568", marginTop: 2 }}>
+                Funded: ${existingSession.fundedAmount} {existingSession.fundingAsset} · Expires:{" "}
+                {existingSession.expiresAt.toLocaleString()} · Principal:{" "}
+                {existingSession.burnerAddress
+                  ? existingSession.burnerAddress.slice(0, 14)
+                  : "N/A"}
+                …
               </div>
             </div>
             <button
-              onClick={() =>
-                checkExistingSession().then((s) => setExistingSession(s))
-              }
+              onClick={() => checkExistingSession().then((s) => setExistingSession(s))}
               style={{
                 background: "transparent",
                 border: "none",
@@ -261,22 +346,22 @@ export default function WalletPage() {
           {[
             {
               icon: DollarSign,
-              label: "Deposit USDC",
-              sublabel: "EOA → Burner Wallet",
+              label: "Deposit Token",
+              sublabel: "Stacks principal ← USDCx/sBTC",
               done: !!existingSession,
             },
             null,
             {
               icon: Key,
               label: "Save Key",
-              sublabel: "Encrypted in backend",
+              sublabel: "SHA-256 encrypted",
               done: !!existingSession,
             },
             null,
             {
               icon: Cpu,
               label: "Agent Active",
-              sublabel: "Gasless checkout",
+              sublabel: "SIP-010 settlement",
               done: !!existingSession,
             },
           ].map((step, i) => {
@@ -298,56 +383,28 @@ export default function WalletPage() {
             return (
               <div
                 key={i}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 8,
-                }}
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}
               >
                 <div
                   style={{
                     width: 44,
                     height: 44,
                     borderRadius: "50%",
-                    background: step.done
-                      ? "hsl(66,100%,50%,0.15)"
-                      : "#1a2332",
-                    border: `1px solid ${
-                      step.done ? "hsl(66,100%,50%,0.5)" : "#2d3748"
-                    }`,
+                    background: step.done ? "hsl(66,100%,50%,0.15)" : "#1a2332",
+                    border: `1px solid ${step.done ? "hsl(66,100%,50%,0.5)" : "#2d3748"}`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    boxShadow: step.done
-                      ? "0 0 16px hsl(66,100%,50%,0.2)"
-                      : "none",
+                    boxShadow: step.done ? "0 0 16px hsl(66,100%,50%,0.2)" : "none",
                   }}
                 >
-                  <Icon
-                    size={18}
-                    color={step.done ? "hsl(66,100%,50%)" : "#2d3748"}
-                  />
+                  <Icon size={18} color={step.done ? "hsl(66,100%,50%)" : "#2d3748"} />
                 </div>
                 <div style={{ textAlign: "center" }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: step.done ? "#e2e8f0" : "#4a5568",
-                    }}
-                  >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: step.done ? "#e2e8f0" : "#4a5568" }}>
                     {step.label}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: "#2d3748",
-                      marginTop: 2,
-                    }}
-                  >
-                    {step.sublabel}
-                  </div>
+                  <div style={{ fontSize: 10, color: "#2d3748", marginTop: 2 }}>{step.sublabel}</div>
                 </div>
               </div>
             );
@@ -370,41 +427,56 @@ export default function WalletPage() {
             }}
           >
             <Shield size={12} />
-            Burner Wallet Settings
+            Stacks Burner Wallet Settings
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 16,
-            }}
-          >
-            {/* Deposit Amount */}
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  color: "#4a5568",
-                  marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                Deposit Amount (USDC)
-              </label>
-              <div style={{ position: "relative" }}>
-                <span
+          {/* Funding Asset Selection */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Funding Asset (SIP-010 Token)
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {(["USDCx", "sBTC"] as FundingAsset[]).map((asset) => (
+                <button
+                  key={asset}
+                  onClick={() => setFundingAsset(asset)}
                   style={{
-                    position: "absolute",
-                    left: 12,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "#4a5568",
-                    fontSize: 14,
+                    flex: 1,
+                    padding: "10px",
+                    background: fundingAsset === asset ? "hsl(66,100%,50%,0.15)" : "#080c10",
+                    border: `1px solid ${fundingAsset === asset ? "hsl(66,100%,50%,0.5)" : "#1a2332"}`,
+                    borderRadius: 10,
+                    color: fundingAsset === asset ? "hsl(66,100%,50%)" : "#64748b",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    fontFamily: "inherit",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
                   }}
                 >
+                  {asset === "sBTC" ? <Bitcoin size={14} /> : <DollarSign size={14} />}
+                  {asset}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "#4a5568", marginTop: 6 }}>
+              {fundingAsset === "USDCx"
+                ? "USDCx: Bridged USDC on Stacks — 6 decimals"
+                : "sBTC: Synthetic Bitcoin on Stacks — 8 decimals"}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* Deposit Amount */}
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                Deposit Amount ({fundingAsset === "USDCx" ? "USD" : "USD equiv."})
+              </label>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#4a5568", fontSize: 14 }}>
                   $
                 </span>
                 <input
@@ -427,22 +499,13 @@ export default function WalletPage() {
                 />
               </div>
               <div style={{ fontSize: 10, color: "#4a5568", marginTop: 6 }}>
-                Sent from your MetaMask to the burner address
+                Sent from your Leather/Xverse wallet
               </div>
             </div>
 
             {/* Session Duration */}
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  color: "#4a5568",
-                  marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}
-              >
+              <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.1em" }}>
                 Session Duration
               </label>
               <select
@@ -470,7 +533,7 @@ export default function WalletPage() {
             </div>
           </div>
 
-          {/* Status bar */}
+          {/* Status / Error */}
           {isLoading && (
             <div
               style={{
@@ -484,14 +547,7 @@ export default function WalletPage() {
                 gap: 10,
               }}
             >
-              <Loader2
-                size={14}
-                color="hsl(66,100%,50%)"
-                style={{
-                  animation: "spin 1s linear infinite",
-                  flexShrink: 0,
-                }}
-              />
+              <Loader2 size={14} color="hsl(66,100%,50%)" style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: "hsl(66,100%,50%)" }}>
                 {statusLabels[status] || status}
               </span>
@@ -512,9 +568,7 @@ export default function WalletPage() {
               }}
             >
               <AlertCircle size={14} color="#ef4444" />
-              <span style={{ fontSize: 12, color: "#ef4444" }}>
-                {actionError}
-              </span>
+              <span style={{ fontSize: 12, color: "#ef4444" }}>{actionError}</span>
             </div>
           )}
 
@@ -533,7 +587,7 @@ export default function WalletPage() {
             >
               <CheckCircle2 size={14} color="hsl(66,100%,50%)" />
               <span style={{ fontSize: 12, color: "hsl(66,100%,50%)" }}>
-                Agent authorized! Return to chat and start shopping.
+                Agent authorized on Stacks! Return to chat and start shopping.
               </span>
             </div>
           )}
@@ -541,44 +595,41 @@ export default function WalletPage() {
           {/* CTA */}
           <button
             onClick={handleAuthorize}
-            disabled={isLoading}
+            disabled={isLoading || !stacksAddress}
             style={{
               width: "100%",
               marginTop: 20,
               padding: "16px 24px",
-              background: isLoading ? "#1a2332" : "hsl(66,100%,50%)",
+              background: isLoading || !stacksAddress ? "#1a2332" : "hsl(66,100%,50%)",
               border: "none",
               borderRadius: 12,
-              color: isLoading ? "#4a5568" : "#000",
+              color: isLoading || !stacksAddress ? "#4a5568" : "#000",
               fontSize: 14,
               fontWeight: 700,
               fontFamily: "'Syne', sans-serif",
-              cursor: isLoading ? "not-allowed" : "pointer",
+              cursor: isLoading || !stacksAddress ? "not-allowed" : "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               gap: 10,
-              boxShadow: isLoading ? "none" : "0 0 32px hsl(66,100%,50%,0.3)",
+              boxShadow: isLoading || !stacksAddress ? "none" : "0 0 32px hsl(66,100%,50%,0.3)",
               transition: "all 0.2s",
             }}
           >
             {isLoading ? (
               <>
-                <Loader2
-                  size={16}
-                  style={{ animation: "spin 1s linear infinite" }}
-                />
+                <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
                 {statusLabels[status]}
               </>
             ) : existingSession ? (
               <>
                 <RefreshCw size={16} />
-                Recharge Burner Wallet
+                Recharge Stacks Burner Wallet
               </>
             ) : (
               <>
                 <Zap size={16} />
-                Deposit & Authorize Agent
+                Deposit {fundingAsset} & Authorize Agent
                 <ArrowRight size={14} />
               </>
             )}
@@ -588,133 +639,56 @@ export default function WalletPage() {
         {/* Active wallet info */}
         {walletInfo && (
           <Card>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#4a5568",
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                marginBottom: 16,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
               <CheckCircle2 size={12} color="hsl(66,100%,50%)" />
-              Burner Wallet Active
+              Stacks Burner Wallet Active
             </div>
-            <InfoRow
-              label="Burner Address"
-              value={walletInfo.burnerAddress}
-              mono
-            />
-            <InfoRow label="Owner EOA" value={walletInfo.ownerEoa} mono />
-            <InfoRow
-              label="Funded Amount"
-              value={`$${walletInfo.fundedAmount} USDC`}
-            />
-            <InfoRow
-              label="Expires"
-              value={walletInfo.expiresAt.toLocaleString()}
-            />
+            <InfoRow label="Burner Stacks Principal" value={walletInfo.burnerAddress} mono />
+            <InfoRow label="Owner Principal" value={walletInfo.ownerPrincipal} mono />
+            <InfoRow label="Funded Amount" value={`$${walletInfo.fundedAmount} ${walletInfo.fundingAsset}`} />
+            <InfoRow label="Expires" value={walletInfo.expiresAt.toLocaleString()} />
           </Card>
         )}
 
         {/* How it works */}
         <Card style={{ marginTop: 20 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "#4a5568",
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              marginBottom: 16,
-            }}
-          >
-            How It Works
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 16 }}>
+            How It Works (Stacks Edition)
           </div>
           {[
             {
               icon: Key,
-              title: "Burner EOA Wallet",
-              desc: "A temporary Ethereum wallet generated in your browser. You fund it once with USDC — no smart contract deployment required.",
+              title: "Stacks Burner Principal",
+              desc: "A temporary Stacks address generated server-side. You fund it once with USDCx or sBTC via your Leather/Xverse wallet using a SIP-010 transfer.",
             },
             {
               icon: Lock,
-              title: "Encrypted Key Storage",
-              desc: "The private key is XOR-encrypted with your wallet address and stored on the backend. The agent uses it to sign transactions autonomously.",
+              title: "SHA-256 Encrypted Key Storage",
+              desc: "The Stacks private key is XOR-encrypted with sha256(yourStacksPrincipal) and stored on the backend. The agent uses it to sign SIP-010 transfers autonomously.",
             },
             {
-              icon: Zap,
-              title: "Gasless Settlement on SKALE",
-              desc: "SKALE transactions have zero gas cost. The agent signs standard eth_sendRawTransaction calls with gasPrice=0. Fast, cheap, no popups.",
+              icon: Bitcoin,
+              title: "Stacks SIP-010 Settlement",
+              desc: "The agent uses @stacks/transactions to sign and broadcast SIP-010 contract calls. Unlike SKALE (gasless), Stacks requires a small STX fee per transaction — dripped automatically.",
             },
           ].map(({ icon: Icon, title, desc }) => (
-            <div
-              key={title}
-              style={{
-                display: "flex",
-                gap: 14,
-                padding: "14px 0",
-                borderBottom: "1px solid #1a2332",
-              }}
-            >
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  background: "hsl(66,100%,50%,0.08)",
-                  border: "1px solid hsl(66,100%,50%,0.15)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
+            <div key={title} style={{ display: "flex", gap: 14, padding: "14px 0", borderBottom: "1px solid #1a2332" }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: "hsl(66,100%,50%,0.08)", border: "1px solid hsl(66,100%,50%,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Icon size={15} color="hsl(66,100%,50%)" />
               </div>
               <div>
-                <div
-                  style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}
-                >
-                  {title}
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#4a5568",
-                    marginTop: 4,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {desc}
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{title}</div>
+                <div style={{ fontSize: 12, color: "#4a5568", marginTop: 4, lineHeight: 1.6 }}>{desc}</div>
               </div>
             </div>
           ))}
-          {/* Security note */}
-          <div
-            style={{
-              marginTop: 16,
-              padding: "12px 14px",
-              background: "#1a233240",
-              borderRadius: 8,
-              fontSize: 11,
-              color: "#4a5568",
-              lineHeight: 1.6,
-            }}
-          >
-            <strong style={{ color: "#64748b" }}>Security:</strong> The maximum
-            loss is strictly limited to the USDC deposited into this burner
-            address. Your main MetaMask wallet is never exposed.
+          <div style={{ marginTop: 16, padding: "12px 14px", background: "#1a233240", borderRadius: 8, fontSize: 11, color: "#4a5568", lineHeight: 1.6 }}>
+            <strong style={{ color: "#64748b" }}>Security:</strong> Maximum loss is limited to the
+            USDCx/sBTC deposited into the burner principal. Your main Leather/Xverse wallet is never exposed.
           </div>
         </Card>
       </div>
 
-      {/* Only render style tag once, and ensure single quotes for URL */}
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');\n@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>
   );
