@@ -1,4 +1,6 @@
+
 "use client";
+import { connect } from "@stacks/connect";
 
 /**
  * app/wallet/page.tsx — Stacks Blockchain Edition
@@ -25,8 +27,6 @@ import {
   Bitcoin,
 } from "lucide-react";
 import { useBurnerWallet, type BurnerWalletInfo, type FundingAsset } from "@/hooks/useBurnerwallet";
-import { showConnect } from "@stacks/connect";
-import { STACKS_TESTNET } from "@stacks/network";
 
 
 function Card({
@@ -109,19 +109,40 @@ export default function WalletPage() {
   }, [checkExistingSession]);
 
   const connectStacksWallet = () => {
-    showConnect({
-      appDetails: {
-        name: "Cart Blanche",
-        icon: "/favicon.ico",
-      },
-      redirectTo: "/wallet",
-      onFinish: (data: any) => {
-        const addr = data.userSession?.loadUserData?.()?.profile?.stxAddress?.testnet;
-        if (addr) {
-          setStacksAddress(addr);
+    connect().then(result => {
+      // result.addresses can be AddressEntry[] or { stx: { mainnet, testnet } | AddressEntry[] }
+      let addr = null;
+      const addresses = result?.addresses;
+      if (Array.isArray(addresses)) {
+        // Leather/Xverse: result.addresses is AddressEntry[]
+        // Each entry is likely an object, extract the address string
+        if (addresses.length > 0 && typeof addresses[0] === 'object' && addresses[0].address) {
+          addr = addresses[0].address;
+        } else if (typeof addresses[0] === 'string') {
+          addr = addresses[0];
         }
-      },
-      userSession: undefined as any,
+      } else if (addresses && typeof addresses === "object" && !Array.isArray(addresses) && 'stx' in addresses) {
+        const stx = (addresses as { stx: any }).stx;
+        if (Array.isArray(stx)) {
+          if (stx.length > 0 && typeof stx[0] === 'object' && stx[0].address) {
+            addr = stx[0].address;
+          } else if (typeof stx[0] === 'string') {
+            addr = stx[0];
+          }
+        } else if (stx && typeof stx === "object") {
+          // stx.mainnet or stx.testnet could be an object or string
+          if (stx.testnet && typeof stx.testnet === 'object' && stx.testnet.address) {
+            addr = stx.testnet.address;
+          } else if (stx.testnet && typeof stx.testnet === 'string') {
+            addr = stx.testnet;
+          } else if (stx.mainnet && typeof stx.mainnet === 'object' && stx.mainnet.address) {
+            addr = stx.mainnet.address;
+          } else if (stx.mainnet && typeof stx.mainnet === 'string') {
+            addr = stx.mainnet;
+          }
+        }
+      }
+      if (addr && typeof addr === 'string') setStacksAddress(addr);
     });
   };
 
@@ -689,7 +710,7 @@ export default function WalletPage() {
         </Card>
       </div>
 
-      <style>{"@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');\n@keyframes spin { to { transform: rotate(360deg); } }"}</style>
+      <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>
   );
 }

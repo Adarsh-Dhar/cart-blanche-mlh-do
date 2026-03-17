@@ -48,10 +48,21 @@ export default function Header() {
 
   const connectStacksWallet = useCallback(() => {
     connect().then(result => {
-      // result may contain addresses or session info
-      if (result && result.addresses && result.addresses.stx) {
-        setStacksAddress(result.addresses.stx[0]);
+      // result.addresses can be AddressEntry[] or { stx: { mainnet, testnet } | AddressEntry[] }
+      let addr = null;
+      const addresses = result?.addresses;
+      if (Array.isArray(addresses)) {
+        // Leather/Xverse: result.addresses is AddressEntry[]
+        addr = addresses[0];
+      } else if (addresses && typeof addresses === "object" && !Array.isArray(addresses) && 'stx' in addresses) {
+        const stx = (addresses as { stx: any }).stx;
+        if (Array.isArray(stx)) {
+          addr = stx[0];
+        } else if (stx && typeof stx === "object") {
+          addr = stx.testnet || stx.mainnet;
+        }
       }
+      if (addr) setStacksAddress(addr);
     });
   }, []);
 
@@ -79,7 +90,7 @@ export default function Header() {
         <div className="flex items-center gap-3">
 
           {/* Stacks wallet chip */}
-          {stacksAddress ? (
+          {typeof stacksAddress === "string" && stacksAddress.length > 0 ? (
             <div
               style={{
                 display: "flex",
@@ -99,7 +110,7 @@ export default function Header() {
               title="Click to disconnect Stacks wallet"
             >
               <Wallet size={12} />
-              {stacksAddress.slice(0, 8)}…{stacksAddress.slice(-4)}
+              {`${stacksAddress.slice(0, 8)}…${stacksAddress.slice(-4)}`}
             </div>
           ) : (
             <button

@@ -34,11 +34,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <style>{`
-          :root {
-            color-scheme: dark;
-          }
-        `}</style>
+        {/* Only theme rules here; font import is handled in globals.css */}
+        <style>{`:root { color-scheme: dark; }`}</style>
       </head>
       {/* Added min-h-screen and flex to ensure the layout stretches properly */}
       <body className={`${inter.className} antialiased bg-background text-foreground min-h-screen flex flex-col`}>
