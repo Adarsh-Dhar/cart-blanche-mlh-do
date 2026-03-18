@@ -1039,11 +1039,7 @@ export default function MintPage() {
         </div>
       </div>
 
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
-        @keyframes spin  { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
-      `}</style>
+      // ...existing code...
     </div>
   );
 }

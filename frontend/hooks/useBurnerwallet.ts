@@ -3,13 +3,14 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Stacks blockchain edition.
  *
- * Uses @stacks/transactions and @stacks/connect to:
- * 1. Generate a Stacks burner principal
- * 2. Fund it with USDCx or sBTC via Leather/Xverse wallet (openContractCall)
- * 3. Save the encrypted key to the backend
+ * ROOT CAUSE OF "0 USDCx" BUG:
+ *   The fallback USDCX_CONTRACT_ADDRESS was hardcoded to ST1PQHQ... here,
+ *   while mint/page.tsx hardcoded ST2YR7... — two different contracts.
+ *   Both pages query the Hiro API with {contractAddress}.{contractName}::{asset}
+ *   as the key, so mismatched addresses → no key match → 0 balance.
  *
- * XOR encryption key: sha256(stacksPrincipal.toLowerCase())
- * Mirrors server-side decryption in tool/x402_settlement.py
+ * FIX: Import all contract addresses from lib/stacks-config.ts (single
+ * source of truth) so every file uses the same deployer address.
  */
 
 "use client";
@@ -21,36 +22,34 @@ import {
   standardPrincipalCV,
   uintCV,
   noneCV,
+  AnchorMode,
+  PostConditionMode,
 } from "@stacks/transactions";
 import { openContractCall } from "@stacks/connect";
 import { STACKS_TESTNET } from "@stacks/network";
 
-// ── Noble hashes ──────────────────────────────────────────────────────────────
-// @noble/hashes v2 exports sha256 directly from the sha2 module.
-// The package.json lists "@noble/hashes": "^2.0.1" so we use the v2 paths.
-import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
-// ── Stacks Testnet contract addresses ─────────────────────────────────────────
-// Deployer from Clarinet.toml / usdcx-project settings
-const USDCX_CONTRACT_ADDRESS =
-  process.env.NEXT_PUBLIC_USDCX_CONTRACT_ADDRESS ||
-  "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4";
-const USDCX_CONTRACT_NAME = "usdcx-token";
-
-const SBTC_CONTRACT_ADDRESS =
-  process.env.NEXT_PUBLIC_SBTC_CONTRACT_ADDRESS ||
-  "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4";
-const SBTC_CONTRACT_NAME = "sbtc-token";
+// ── Single source of truth for all contract addresses ─────────────────────────
+import {
+  USDCX_CONTRACT_ADDRESS,
+  USDCX_CONTRACT_NAME,
+  USDCX_DECIMALS,
+  SBTC_CONTRACT_ADDRESS,
+  SBTC_CONTRACT_NAME,
+  SBTC_DECIMALS,
+  fetchTokenBalance,
+} from "@/lib/stacks-config";
 
 export type FundingAsset = "USDCx" | "sBTC";
 
 export interface BurnerWalletInfo {
-  burnerAddress: string;    // Stacks principal e.g. ST...
-  ownerPrincipal: string;   // Connected Stacks wallet principal
-  fundedAmount: number;
-  fundingAsset: FundingAsset;
-  expiresAt: Date;
+  burnerAddress:  string;
+  ownerPrincipal: string;
+  fundedAmount:   number;
+  fundingAsset:   FundingAsset;
+  expiresAt:      Date;
 }
 
 export type BurnerWalletStatus =
@@ -61,13 +60,11 @@ export type BurnerWalletStatus =
   | "ready"
   | "error";
 
-// ── XOR encryption using sha256 ───────────────────────────────────────────────
-// Key = sha256(ownerPrincipal.toLowerCase())
-// Must mirror server/tool/x402_settlement.py _decrypt_burner_key()
+// ── XOR encryption ─────────────────────────────────────────────────────────────
 function encryptPrivateKey(privateKeyHex: string, ownerPrincipal: string): string {
-  const keyBytes = sha256(new TextEncoder().encode(ownerPrincipal.toLowerCase()));
-  const clean    = privateKeyHex.startsWith("0x") ? privateKeyHex.slice(2) : privateKeyHex;
-  const pkBytes  = hexToBytes(clean);
+  const keyBytes  = sha256(new TextEncoder().encode(ownerPrincipal.toLowerCase()));
+  const clean     = privateKeyHex.startsWith("0x") ? privateKeyHex.slice(2) : privateKeyHex;
+  const pkBytes   = hexToBytes(clean);
   const encrypted = new Uint8Array(pkBytes.length);
   for (let i = 0; i < pkBytes.length; i++) {
     encrypted[i] = pkBytes[i] ^ keyBytes[i % keyBytes.length];
@@ -75,80 +72,109 @@ function encryptPrivateKey(privateKeyHex: string, ownerPrincipal: string): strin
   return "0x" + bytesToHex(encrypted);
 }
 
-// ── Extract raw private key hex from makeRandomPrivKey result ─────────────────
-// @stacks/transactions v7 makeRandomPrivKey() can return StacksPrivateKey | string
+// ── Private key extraction ────────────────────────────────────────────────────
+// Strip trailing "01" compression flag (66 hex chars → 64) before use.
 function extractPrivKeyHex(privKey: unknown): string {
-  if (typeof privKey === "string") return privKey;
-  // StacksPrivateKey shape: { data: Uint8Array | string }
-  const pk = privKey as { data?: unknown };
-  if (pk.data instanceof Uint8Array) return bytesToHex(pk.data);
-  if (typeof pk.data === "string") return pk.data;
-  throw new Error("Cannot extract private key hex from makeRandomPrivKey result");
+  let hex: string;
+  if (typeof privKey === "string") {
+    hex = privKey;
+  } else {
+    const pk = privKey as { data?: unknown };
+    if (pk.data instanceof Uint8Array) hex = bytesToHex(pk.data);
+    else if (typeof pk.data === "string") hex = pk.data;
+    else throw new Error("Cannot extract private key hex from makeRandomPrivKey result");
+  }
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  // 33 bytes with compression flag → strip to 32 bytes
+  return clean.length === 66 && clean.endsWith("01") ? clean.slice(0, 64) : clean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 export function useBurnerWallet() {
-  const [status, setStatus]     = useState<BurnerWalletStatus>("idle");
-  const [error, setError]       = useState<string | null>(null);
+  const [status,     setStatus]     = useState<BurnerWalletStatus>("idle");
+  const [error,      setError]      = useState<string | null>(null);
   const [walletInfo, setWalletInfo] = useState<BurnerWalletInfo | null>(null);
+
+  /** Fetch + log the USDCx balance of any Stacks address. */
+  const logBalance = useCallback(
+    async (address: string, label = "address"): Promise<number> => {
+      const bal = await fetchTokenBalance(address);
+      console.log(`[BurnerWallet] USDCx balance of ${label} (${address}): ${bal}`);
+      return bal;
+    },
+    [],
+  );
 
   const authorizeShoppingAgent = useCallback(
     async ({
-      fundAmountUsdc = 100,
+      fundAmountUsdc       = 100,
       sessionDurationHours = 24,
-      fundingAsset = "USDCx" as FundingAsset,
+      fundingAsset         = "USDCx" as FundingAsset,
       ownerStacksAddress,
     }: {
-      fundAmountUsdc?: number;
+      fundAmountUsdc?:       number;
       sessionDurationHours?: number;
-      fundingAsset?: FundingAsset;
-      ownerStacksAddress: string;
+      fundingAsset?:         FundingAsset;
+      ownerStacksAddress:    string;
     }): Promise<BurnerWalletInfo> => {
       setError(null);
 
       try {
-        // ── Step 1: Generate Stacks burner key & address ─────────────────────
-        setStatus("generating");
+        console.log("[BurnerWallet] ── Starting authorization ──");
+        console.log("[BurnerWallet] Owner:", ownerStacksAddress);
+        console.log("[BurnerWallet] Asset:", fundingAsset, "| Amount:", fundAmountUsdc);
 
-        const rawPrivKey    = makeRandomPrivKey();
-        const privKeyHex    = extractPrivKeyHex(rawPrivKey);
-        // getAddressFromPrivateKey(hex, networkString) in @stacks/transactions v7
-        const burnerAddress = getAddressFromPrivateKey(privKeyHex, "testnet");
-
-        if (!burnerAddress || !burnerAddress.startsWith("S")) {
-          throw new Error(`Generated invalid burner address: ${burnerAddress}`);
+        // Check owner has enough balance before opening the wallet popup
+        const ownerBalanceBefore = await logBalance(ownerStacksAddress, "owner (before)");
+        if (ownerBalanceBefore < fundAmountUsdc) {
+          console.warn(
+            `[BurnerWallet] Low balance: ${ownerBalanceBefore} < requested ${fundAmountUsdc}`,
+          );
         }
 
-        console.log("[BurnerWallet] Generated Stacks burner principal:", burnerAddress);
+        // ── Step 1: Generate burner key + address ─────────────────────────────
+        setStatus("generating");
+        const rawPrivKey    = makeRandomPrivKey();
+        const privKeyHex    = extractPrivKeyHex(rawPrivKey);
+        const burnerAddress = getAddressFromPrivateKey(privKeyHex, "testnet");
 
-        // ── Step 2: Fund burner via openContractCall ──────────────────────────
-        const decimals      = fundingAsset === "USDCx" ? 6 : 8;
-        const amountAtomic  = Math.floor(fundAmountUsdc * Math.pow(10, decimals));
+        if (!burnerAddress?.startsWith("S")) {
+          throw new Error(`Generated invalid burner address: "${burnerAddress}"`);
+        }
+        console.log("[BurnerWallet] ✓ Burner principal:", burnerAddress);
 
-        const contractAddress = fundingAsset === "USDCx" ? USDCX_CONTRACT_ADDRESS : SBTC_CONTRACT_ADDRESS;
-        const contractName    = fundingAsset === "USDCx" ? USDCX_CONTRACT_NAME    : SBTC_CONTRACT_NAME;
+        // ── Step 2: Fund burner via wallet popup ──────────────────────────────
+        const isUSDCx      = fundingAsset === "USDCx";
+        const decimals     = isUSDCx ? USDCX_DECIMALS : SBTC_DECIMALS;
+        const contractAddr = isUSDCx ? USDCX_CONTRACT_ADDRESS : SBTC_CONTRACT_ADDRESS;
+        const contractName = isUSDCx ? USDCX_CONTRACT_NAME    : SBTC_CONTRACT_NAME;
+        const amountAtomic = Math.floor(fundAmountUsdc * Math.pow(10, decimals));
 
-        // SIP-010 transfer(amount, sender, recipient, memo)
-        // Note: sender is the owner's wallet (tx-sender in Clarity)
-        // The contract checks tx-sender === sender arg
+        console.log("[BurnerWallet] Contract:", `${contractAddr}.${contractName}`);
+        console.log("[BurnerWallet] Amount atomic:", amountAtomic);
+
+        // SIP-010 transfer(amount uint, sender principal, recipient principal, memo optional<buff>)
+        // Clarity asserts: (is-eq tx-sender sender) → sender MUST be ownerStacksAddress
         const functionArgs = [
           uintCV(amountAtomic),
-          standardPrincipalCV(ownerStacksAddress),   // sender = owner wallet
-          standardPrincipalCV(burnerAddress),        // recipient = burner
-          noneCV(),                                  // memo = none
+          standardPrincipalCV(ownerStacksAddress),  // sender  = connected wallet (tx-sender)
+          standardPrincipalCV(burnerAddress),       // recipient = burner
+          noneCV(),                                 // memo = none
         ];
 
         setStatus("funding");
 
         await new Promise<void>((resolve, reject) => {
           openContractCall({
-            contractAddress,
+            contractAddress:   contractAddr,
             contractName,
-            functionName: "transfer",
+            functionName:      "transfer",
             functionArgs,
-            network:    STACKS_TESTNET,
+            network:           STACKS_TESTNET,
+            anchorMode:        AnchorMode.Any,
+            postConditionMode: PostConditionMode.Allow,
             onFinish: (data) => {
-              console.log("[BurnerWallet] Transfer tx broadcasted:", data.txId);
+              console.log("[BurnerWallet] ✓ Transfer tx:", data.txId);
               resolve();
             },
             onCancel: () => {
@@ -157,32 +183,30 @@ export function useBurnerWallet() {
           });
         });
 
-        // ── Step 3: Save encrypted key to backend ────────────────────────────
+        // ── Step 3: Save encrypted key to backend ─────────────────────────────
         setStatus("saving");
-
         const expiresAt    = new Date(Date.now() + sessionDurationHours * 60 * 60 * 1000);
         const encryptedKey = encryptPrivateKey(privKeyHex, ownerStacksAddress);
-
-        const savePayload = {
-          smartWalletAddress:         burnerAddress,
-          sessionKeyPublic:           burnerAddress,
-          sessionKeyEncryptedPrivate: encryptedKey,
-          spendLimitUsdc:             fundAmountUsdc,
-          expiresAt:                  expiresAt.toISOString(),
-          ownerEoa:                   ownerStacksAddress,   // Stacks principal in ownerEoa field
-          fundingAsset,
-        };
 
         const res = await fetch("/api/wallet/session-key", {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify(savePayload),
+          body:    JSON.stringify({
+            smartWalletAddress:         burnerAddress,
+            sessionKeyPublic:           burnerAddress,
+            sessionKeyEncryptedPrivate: encryptedKey,
+            spendLimitUsdc:             fundAmountUsdc,
+            expiresAt:                  expiresAt.toISOString(),
+            ownerEoa:                   ownerStacksAddress,
+            fundingAsset,
+          }),
         });
 
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(`Failed to save burner wallet: ${errData.error || res.statusText}`);
+          const err = await res.json().catch(() => ({}));
+          throw new Error(`Failed to save burner wallet: ${err.error || res.statusText}`);
         }
+        console.log("[BurnerWallet] ✓ Session key saved.");
 
         const info: BurnerWalletInfo = {
           burnerAddress,
@@ -197,39 +221,36 @@ export function useBurnerWallet() {
 
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "An unknown error occurred";
-        console.error("[BurnerWallet] Error:", err);
+        console.error("[BurnerWallet] ✗ Error:", err);
         setError(msg);
         setStatus("error");
         throw err;
       }
     },
-    []
+    [logBalance],
   );
 
-  const checkExistingSession = useCallback(
-    async (): Promise<BurnerWalletInfo | null> => {
-      try {
-        const res = await fetch("/api/wallet/session-key");
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (!data.data) return null;
-        const expiresAt = new Date(data.data.expiresAt);
-        if (expiresAt < new Date()) return null;
-        const info: BurnerWalletInfo = {
-          burnerAddress:  data.data.smartWalletAddress,
-          ownerPrincipal: data.data.ownerEoa,
-          fundedAmount:   parseFloat(data.data.spendLimitUsdc),
-          fundingAsset:   (data.data.fundingAsset as FundingAsset) || "USDCx",
-          expiresAt,
-        };
-        setWalletInfo(info);
-        return info;
-      } catch {
-        return null;
-      }
-    },
-    []
-  );
+  const checkExistingSession = useCallback(async (): Promise<BurnerWalletInfo | null> => {
+    try {
+      const res  = await fetch("/api/wallet/session-key");
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.data) return null;
+      const expiresAt = new Date(data.data.expiresAt);
+      if (expiresAt < new Date()) return null;
+      const info: BurnerWalletInfo = {
+        burnerAddress:  data.data.smartWalletAddress,
+        ownerPrincipal: data.data.ownerEoa,
+        fundedAmount:   parseFloat(data.data.spendLimitUsdc),
+        fundingAsset:   (data.data.fundingAsset as FundingAsset) || "USDCx",
+        expiresAt,
+      };
+      setWalletInfo(info);
+      return info;
+    } catch {
+      return null;
+    }
+  }, []);
 
-  return { status, error, walletInfo, authorizeShoppingAgent, checkExistingSession };
+  return { status, error, walletInfo, authorizeShoppingAgent, checkExistingSession, logBalance };
 }
