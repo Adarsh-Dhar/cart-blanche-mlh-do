@@ -1,0 +1,35 @@
+id: 0
+name: Testnet deployment
+network: testnet
+stacks-node: https://api.testnet.hiro.so
+bitcoin-node: http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332
+plan:
+  batches:
+  - id: 0
+    transactions:
+    - transaction-type: requirement-publish
+      contract-id: SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard
+      remap-sender: ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4
+      remap-principals:
+        SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE: ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4
+      cost: 8400
+      path: .cache/requirements/SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.clar
+      clarity-version: 1
+    epoch: '2.0'
+  - id: 1
+    transactions:
+    - transaction-type: contract-publish
+      contract-name: usdcx-token
+      expected-sender: ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4
+      cost: 71970
+      path: contracts/usdcx-token.clar
+      anchor-block-only: true
+      clarity-version: 2
+    - transaction-type: contract-publish
+      contract-name: usdcx-v1
+      expected-sender: ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4
+      cost: 94770
+      path: contracts/usdcx-v1.clar
+      anchor-block-only: true
+      clarity-version: 2
+    epoch: '2.5'

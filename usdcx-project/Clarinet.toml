@@ -1,0 +1,18 @@
+[project]
+name = "usdcx-project"
+authors = []
+description = ""
+telemetry = false
+
+[[project.requirements]]
+contract_id = "SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard"
+
+[contracts.usdcx-token]
+path = "contracts/usdcx-token.clar"
+clarity_version = 2
+epoch = "2.5"
+
+[contracts.usdcx-v1]
+path = "contracts/usdcx-v1.clar"
+clarity_version = 2
+epoch = "2.5"
