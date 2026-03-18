@@ -161,20 +161,22 @@ export function useBurnerWallet() {
           standardPrincipalCV(burnerAddress),       // recipient = burner
           noneCV(),                                 // memo = none
         ];
+        const contractAddress = `${contractAddr}.${contractName}`;
 
         setStatus("funding");
 
         await new Promise<void>((resolve, reject) => {
           openContractCall({
-            contractAddress:   contractAddr,
+            contractAddress,
             contractName,
-            functionName:      "transfer",
+            functionName: "transfer",
             functionArgs,
-            network:           STACKS_TESTNET,
-            anchorMode:        AnchorMode.Any,
-            postConditionMode: PostConditionMode.Allow,
+            // THE FIX: Explicitly allow the transfer logic to simulate
+            postConditionMode: PostConditionMode.Allow, 
+            // THE FIX: Use an instantiated network object
+            network: STACKS_TESTNET,               
             onFinish: (data) => {
-              console.log("[BurnerWallet] ✓ Transfer tx:", data.txId);
+              console.log("[BurnerWallet] Transfer tx broadcasted:", data.txId);
               resolve();
             },
             onCancel: () => {

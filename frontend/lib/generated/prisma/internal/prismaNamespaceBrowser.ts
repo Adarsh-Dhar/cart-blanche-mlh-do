@@ -195,6 +195,7 @@ export const SmartWalletScalarFieldEnum = {
   sessionKeyEncryptedPrivate: 'sessionKeyEncryptedPrivate',
   spendLimitUsdc: 'spendLimitUsdc',
   expiresAt: 'expiresAt',
+  fundingAsset: 'fundingAsset',
   chatId: 'chatId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

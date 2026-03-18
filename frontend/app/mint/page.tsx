@@ -37,6 +37,7 @@ import {
 const DEPLOYER      = "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4";
 const CONTRACT_NAME = "usdcx-token";
 const DECIMALS      = 6;
+const USDCX_ATOMIC_UNITS = 1_000_000; // 1 USDCx = 1,000,000 atomic units
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type TxStatus  = "idle" | "connecting" | "signing" | "success" | "error";
@@ -206,7 +207,7 @@ export default function MintPage() {
       setError("Enter a valid amount.");
       return;
     }
-    const atomicAmount = Math.floor(parsedAmount * Math.pow(10, DECIMALS));
+    const atomicAmount = Math.floor(parsedAmount * USDCX_ATOMIC_UNITS);
     const prevBal      = balance ?? 0;
 
     try {
@@ -249,7 +250,7 @@ export default function MintPage() {
   const parsedAmt    = parseFloat(amount);
   const atomicDisplay =
     !isNaN(parsedAmt) && parsedAmt > 0
-      ? (parsedAmt * Math.pow(10, DECIMALS)).toLocaleString()
+      ? (parsedAmt * USDCX_ATOMIC_UNITS).toLocaleString()
       : null;
 
   // ── Render ───────────────────────────────────────────────────────────────────

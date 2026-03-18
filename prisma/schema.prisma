@@ -158,6 +158,7 @@ model SmartWallet {
   sessionKeyEncryptedPrivate String
   spendLimitUsdc             Decimal  @db.Decimal(10, 2)
   expiresAt                  DateTime
+  fundingAsset               String?
   chatId                     String?
   chat                       Chat?    @relation(fields: [chatId], references: [id])
   createdAt                  DateTime @default(now())

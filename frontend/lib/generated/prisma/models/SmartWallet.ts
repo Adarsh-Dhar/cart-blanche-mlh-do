@@ -42,6 +42,7 @@ export type SmartWalletMinAggregateOutputType = {
   sessionKeyEncryptedPrivate: string | null
   spendLimitUsdc: runtime.Decimal | null
   expiresAt: Date | null
+  fundingAsset: string | null
   chatId: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -55,6 +56,7 @@ export type SmartWalletMaxAggregateOutputType = {
   sessionKeyEncryptedPrivate: string | null
   spendLimitUsdc: runtime.Decimal | null
   expiresAt: Date | null
+  fundingAsset: string | null
   chatId: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -68,6 +70,7 @@ export type SmartWalletCountAggregateOutputType = {
   sessionKeyEncryptedPrivate: number
   spendLimitUsdc: number
   expiresAt: number
+  fundingAsset: number
   chatId: number
   createdAt: number
   updatedAt: number
@@ -91,6 +94,7 @@ export type SmartWalletMinAggregateInputType = {
   sessionKeyEncryptedPrivate?: true
   spendLimitUsdc?: true
   expiresAt?: true
+  fundingAsset?: true
   chatId?: true
   createdAt?: true
   updatedAt?: true
@@ -104,6 +108,7 @@ export type SmartWalletMaxAggregateInputType = {
   sessionKeyEncryptedPrivate?: true
   spendLimitUsdc?: true
   expiresAt?: true
+  fundingAsset?: true
   chatId?: true
   createdAt?: true
   updatedAt?: true
@@ -117,6 +122,7 @@ export type SmartWalletCountAggregateInputType = {
   sessionKeyEncryptedPrivate?: true
   spendLimitUsdc?: true
   expiresAt?: true
+  fundingAsset?: true
   chatId?: true
   createdAt?: true
   updatedAt?: true
@@ -217,6 +223,7 @@ export type SmartWalletGroupByOutputType = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal
   expiresAt: Date
+  fundingAsset: string | null
   chatId: string | null
   createdAt: Date
   updatedAt: Date
@@ -253,6 +260,7 @@ export type SmartWalletWhereInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFilter<"SmartWallet"> | string
   spendLimitUsdc?: Prisma.DecimalFilter<"SmartWallet"> | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
+  fundingAsset?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   chatId?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   createdAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
@@ -267,6 +275,7 @@ export type SmartWalletOrderByWithRelationInput = {
   sessionKeyEncryptedPrivate?: Prisma.SortOrder
   spendLimitUsdc?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
+  fundingAsset?: Prisma.SortOrderInput | Prisma.SortOrder
   chatId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -284,6 +293,7 @@ export type SmartWalletWhereUniqueInput = Prisma.AtLeast<{
   sessionKeyEncryptedPrivate?: Prisma.StringFilter<"SmartWallet"> | string
   spendLimitUsdc?: Prisma.DecimalFilter<"SmartWallet"> | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
+  fundingAsset?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   chatId?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   createdAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
@@ -298,6 +308,7 @@ export type SmartWalletOrderByWithAggregationInput = {
   sessionKeyEncryptedPrivate?: Prisma.SortOrder
   spendLimitUsdc?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
+  fundingAsset?: Prisma.SortOrderInput | Prisma.SortOrder
   chatId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -319,6 +330,7 @@ export type SmartWalletScalarWhereWithAggregatesInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringWithAggregatesFilter<"SmartWallet"> | string
   spendLimitUsdc?: Prisma.DecimalWithAggregatesFilter<"SmartWallet"> | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeWithAggregatesFilter<"SmartWallet"> | Date | string
+  fundingAsset?: Prisma.StringNullableWithAggregatesFilter<"SmartWallet"> | string | null
   chatId?: Prisma.StringNullableWithAggregatesFilter<"SmartWallet"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"SmartWallet"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"SmartWallet"> | Date | string
@@ -332,6 +344,7 @@ export type SmartWalletCreateInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   chat?: Prisma.ChatCreateNestedOneWithoutSmartWalletsInput
@@ -345,6 +358,7 @@ export type SmartWalletUncheckedCreateInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   chatId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -358,6 +372,7 @@ export type SmartWalletUpdateInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   chat?: Prisma.ChatUpdateOneWithoutSmartWalletsNestedInput
@@ -371,6 +386,7 @@ export type SmartWalletUncheckedUpdateInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   chatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -384,6 +400,7 @@ export type SmartWalletCreateManyInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   chatId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -397,6 +414,7 @@ export type SmartWalletUpdateManyMutationInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -409,6 +427,7 @@ export type SmartWalletUncheckedUpdateManyInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   chatId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -432,6 +451,7 @@ export type SmartWalletCountOrderByAggregateInput = {
   sessionKeyEncryptedPrivate?: Prisma.SortOrder
   spendLimitUsdc?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
+  fundingAsset?: Prisma.SortOrder
   chatId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -449,6 +469,7 @@ export type SmartWalletMaxOrderByAggregateInput = {
   sessionKeyEncryptedPrivate?: Prisma.SortOrder
   spendLimitUsdc?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
+  fundingAsset?: Prisma.SortOrder
   chatId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -462,6 +483,7 @@ export type SmartWalletMinOrderByAggregateInput = {
   sessionKeyEncryptedPrivate?: Prisma.SortOrder
   spendLimitUsdc?: Prisma.SortOrder
   expiresAt?: Prisma.SortOrder
+  fundingAsset?: Prisma.SortOrder
   chatId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -521,6 +543,7 @@ export type SmartWalletCreateWithoutChatInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -533,6 +556,7 @@ export type SmartWalletUncheckedCreateWithoutChatInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -574,6 +598,7 @@ export type SmartWalletScalarWhereInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFilter<"SmartWallet"> | string
   spendLimitUsdc?: Prisma.DecimalFilter<"SmartWallet"> | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
+  fundingAsset?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   chatId?: Prisma.StringNullableFilter<"SmartWallet"> | string | null
   createdAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"SmartWallet"> | Date | string
@@ -587,6 +612,7 @@ export type SmartWalletCreateManyChatInput = {
   sessionKeyEncryptedPrivate: string
   spendLimitUsdc: runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt: Date | string
+  fundingAsset?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -599,6 +625,7 @@ export type SmartWalletUpdateWithoutChatInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -611,6 +638,7 @@ export type SmartWalletUncheckedUpdateWithoutChatInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -623,6 +651,7 @@ export type SmartWalletUncheckedUpdateManyWithoutChatInput = {
   sessionKeyEncryptedPrivate?: Prisma.StringFieldUpdateOperationsInput | string
   spendLimitUsdc?: Prisma.DecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string
   expiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  fundingAsset?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -637,6 +666,7 @@ export type SmartWalletSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   sessionKeyEncryptedPrivate?: boolean
   spendLimitUsdc?: boolean
   expiresAt?: boolean
+  fundingAsset?: boolean
   chatId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -651,6 +681,7 @@ export type SmartWalletSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   sessionKeyEncryptedPrivate?: boolean
   spendLimitUsdc?: boolean
   expiresAt?: boolean
+  fundingAsset?: boolean
   chatId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -665,6 +696,7 @@ export type SmartWalletSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   sessionKeyEncryptedPrivate?: boolean
   spendLimitUsdc?: boolean
   expiresAt?: boolean
+  fundingAsset?: boolean
   chatId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -679,12 +711,13 @@ export type SmartWalletSelectScalar = {
   sessionKeyEncryptedPrivate?: boolean
   spendLimitUsdc?: boolean
   expiresAt?: boolean
+  fundingAsset?: boolean
   chatId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type SmartWalletOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "ownerEoa" | "smartWalletAddress" | "sessionKeyPublic" | "sessionKeyEncryptedPrivate" | "spendLimitUsdc" | "expiresAt" | "chatId" | "createdAt" | "updatedAt", ExtArgs["result"]["smartWallet"]>
+export type SmartWalletOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "ownerEoa" | "smartWalletAddress" | "sessionKeyPublic" | "sessionKeyEncryptedPrivate" | "spendLimitUsdc" | "expiresAt" | "fundingAsset" | "chatId" | "createdAt" | "updatedAt", ExtArgs["result"]["smartWallet"]>
 export type SmartWalletInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   chat?: boolean | Prisma.SmartWallet$chatArgs<ExtArgs>
 }
@@ -708,6 +741,7 @@ export type $SmartWalletPayload<ExtArgs extends runtime.Types.Extensions.Interna
     sessionKeyEncryptedPrivate: string
     spendLimitUsdc: runtime.Decimal
     expiresAt: Date
+    fundingAsset: string | null
     chatId: string | null
     createdAt: Date
     updatedAt: Date
@@ -1142,6 +1176,7 @@ export interface SmartWalletFieldRefs {
   readonly sessionKeyEncryptedPrivate: Prisma.FieldRef<"SmartWallet", 'String'>
   readonly spendLimitUsdc: Prisma.FieldRef<"SmartWallet", 'Decimal'>
   readonly expiresAt: Prisma.FieldRef<"SmartWallet", 'DateTime'>
+  readonly fundingAsset: Prisma.FieldRef<"SmartWallet", 'String'>
   readonly chatId: Prisma.FieldRef<"SmartWallet", 'String'>
   readonly createdAt: Prisma.FieldRef<"SmartWallet", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"SmartWallet", 'DateTime'>
