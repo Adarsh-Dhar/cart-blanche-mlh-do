@@ -1,22 +1,17 @@
 """
 tool/stack_tx_builder.py — Pure Python Stacks SIP-010 Transaction Builder
-===========================================================================
-(Renamed from stack_tx_builder.py to match import in x402_settlement.py)
 
-Constructs, signs, and broadcasts Stacks contract-call transactions
-(SIP-010 token transfers) and plain STX transfers using only Python
-standard library + the `cryptography` package.
-
-No Node.js subprocess required.
-
-Implements the Stacks wire format following SIP-005.
+CORRECT signing protocol (per stacks.js authorization.ts):
+  - spending condition signer = hash160(pubkey) in ALL tx variants
+  - presig hash = sha512/256(tx_with_sig_zeroed || 0x04)
+  - ONLY the 65-byte signature field is zeroed when computing the hash
+  - The signer field is NEVER zeroed
 """
 from __future__ import annotations
 
 import hashlib
 import hmac as _hmac
 import logging
-import os
 import struct
 from typing import Optional
 
@@ -27,28 +22,25 @@ from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger(__name__)
 
-# ── Network constants ──────────────────────────────────────────────────────────
 CHAIN_ID_TESTNET     = 0x80000000
 CHAIN_ID_MAINNET     = 0x00000001
 TX_VERSION_TESTNET   = 0x80
 TX_VERSION_MAINNET   = 0x00
-ADDR_VERSION_TESTNET = 26   # P2PKH testnet ('T' → 'ST...')
-ADDR_VERSION_MAINNET = 22   # P2PKH mainnet ('P' → 'SP...')
+ADDR_VERSION_TESTNET = 26
+ADDR_VERSION_MAINNET = 22
 
 STACKS_API_TESTNET = "https://api.testnet.hiro.so"
 STACKS_API_MAINNET = "https://api.hiro.so"
 
-# Wire-format constants
 PAYLOAD_CONTRACT_CALL   = 0x02
 PAYLOAD_TOKEN_TRANSFER  = 0x00
 AUTH_STANDARD           = 0x04
 HASH_MODE_P2PKH         = 0x00
 ANCHOR_ANY              = 0x03
 POST_COND_ALLOW         = 0x01
-KEY_ENCODING_COMPRESSED = 0x05
+KEY_ENCODING_COMPRESSED = 0x00
 SIGHASH_ALL             = b"\x04"
 
-# secp256k1 curve parameters
 _P  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
 _N  = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 _GX = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
@@ -56,26 +48,21 @@ _GY = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
 _G  = (_GX, _GY)
 
 
-# ── Hashing helpers ────────────────────────────────────────────────────────────
+def _sha256(d: bytes) -> bytes:
+    return hashlib.sha256(d).digest()
 
-def _sha256(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
+def _sha256d(d: bytes) -> bytes:
+    return _sha256(_sha256(d))
 
-def _sha256d(data: bytes) -> bytes:
-    return _sha256(_sha256(data))
+def _hash160(d: bytes) -> bytes:
+    return hashlib.new("ripemd160", _sha256(d)).digest()
 
-def _hash160(data: bytes) -> bytes:
-    h = hashlib.new("ripemd160", _sha256(data)).digest()
-    return h
-
-def _sha512_256(data: bytes) -> bytes:
-    return hashlib.new("sha512_256", data).digest()
+def _sha512_256(d: bytes) -> bytes:
+    return hashlib.new("sha512_256", d).digest()
 
 def _hmac_sha256(key: bytes, msg: bytes) -> bytes:
     return _hmac.new(key, msg, hashlib.sha256).digest()
 
-
-# ── c32check address encoding (pure Python) ───────────────────────────────────
 
 _C32     = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _C32_INV = {c: i for i, c in enumerate(_C32)}
@@ -96,14 +83,12 @@ def _c32encode_payload(payload: bytes) -> str:
 
 
 def c32address(version: int, h160: bytes) -> str:
-    """Encode hash160 + version as a Stacks address: 'S' + version_char + c32body."""
     checksum = _sha256d(bytes([version]) + h160)[:4]
     payload  = h160 + checksum
     return "S" + _C32[version] + _c32encode_payload(payload)
 
 
 def _parse_stacks_address(address: str) -> tuple[int, bytes]:
-    """Return (version, hash160) from a Stacks address string."""
     if len(address) < 3:
         raise ValueError(f"Invalid Stacks address: {address!r}")
     version = _C32_INV.get(address[1])
@@ -114,21 +99,17 @@ def _parse_stacks_address(address: str) -> tuple[int, bytes]:
         if ch not in _C32_INV:
             raise ValueError(f"Invalid c32 character in address: {ch!r}")
         num = num * 32 + _C32_INV[ch]
-    # 20 bytes hash160 + 4 bytes checksum = 24 bytes
     raw = num.to_bytes(24, "big")
     return version, raw[:20]
 
 
 def principal_from_private_key(priv_hex: str, testnet: bool = True) -> str:
-    """Derive a Stacks principal (ST... / SP...) from a hex private key."""
-    priv_hex_clean = priv_hex[2:] if priv_hex.startswith("0x") else priv_hex
-    # Strip trailing "01" compression flag if present (65 hex chars → 64)
-    if len(priv_hex_clean) == 66 and priv_hex_clean.endswith("01"):
-        priv_hex_clean = priv_hex_clean[:64]
-    priv_bytes = bytes.fromhex(priv_hex_clean)
-    priv_int   = int.from_bytes(priv_bytes, "big")
-    key        = ec.derive_private_key(priv_int, ec.SECP256K1(), default_backend())
-    pub_bytes  = key.public_key().public_bytes(
+    clean = priv_hex[2:] if priv_hex.startswith("0x") else priv_hex
+    if len(clean) == 66 and clean.endswith("01"):
+        clean = clean[:64]
+    priv_int = int.from_bytes(bytes.fromhex(clean), "big")
+    key = ec.derive_private_key(priv_int, ec.SECP256K1(), default_backend())
+    pub_bytes = key.public_key().public_bytes(
         serialization.Encoding.X962,
         serialization.PublicFormat.CompressedPoint,
     )
@@ -136,20 +117,15 @@ def principal_from_private_key(priv_hex: str, testnet: bool = True) -> str:
     return c32address(version, _hash160(pub_bytes))
 
 
-# ── secp256k1 field math ───────────────────────────────────────────────────────
-
 def _modinv(a: int, m: int) -> int:
     return pow(a, m - 2, m)
 
 
 def _point_add(P: Optional[tuple], Q: Optional[tuple]) -> Optional[tuple]:
-    if P is None:
-        return Q
-    if Q is None:
-        return P
+    if P is None: return Q
+    if Q is None: return P
     if P[0] == Q[0]:
-        if P[1] != Q[1]:
-            return None
+        if P[1] != Q[1]: return None
         lam = (3 * P[0] * P[0] * _modinv(2 * P[1], _P)) % _P
     else:
         lam = ((Q[1] - P[1]) * _modinv(Q[0] - P[0], _P)) % _P
@@ -161,81 +137,54 @@ def _point_add(P: Optional[tuple], Q: Optional[tuple]) -> Optional[tuple]:
 def _point_mul(P: tuple, k: int) -> Optional[tuple]:
     R: Optional[tuple] = None
     while k:
-        if k & 1:
-            R = _point_add(R, P)
+        if k & 1: R = _point_add(R, P)
         P = _point_add(P, P)  # type: ignore[assignment]
         k >>= 1
     return R
 
 
-# ── RFC 6979 deterministic k ───────────────────────────────────────────────────
-
 def _rfc6979_k(priv_int: int, msg_hash: bytes) -> int:
-    x  = priv_int.to_bytes(32, "big")
-    h1 = msg_hash
-    K  = b"\x00" * 32
-    V  = b"\x01" * 32
-    K  = _hmac_sha256(K, V + b"\x00" + x + h1)
-    V  = _hmac_sha256(K, V)
-    K  = _hmac_sha256(K, V + b"\x01" + x + h1)
-    V  = _hmac_sha256(K, V)
+    x = priv_int.to_bytes(32, "big")
+    K = b"\x00" * 32; V = b"\x01" * 32
+    K = _hmac_sha256(K, V + b"\x00" + x + msg_hash)
+    V = _hmac_sha256(K, V)
+    K = _hmac_sha256(K, V + b"\x01" + x + msg_hash)
+    V = _hmac_sha256(K, V)
     while True:
         V = _hmac_sha256(K, V)
         k = int.from_bytes(V, "big")
-        if 1 <= k < _N:
-            return k
-        K = _hmac_sha256(K, V + b"\x00")
-        V = _hmac_sha256(K, V)
+        if 1 <= k < _N: return k
+        K = _hmac_sha256(K, V + b"\x00"); V = _hmac_sha256(K, V)
 
 
 def _sign_recoverable(priv_bytes: bytes, msg_hash: bytes) -> bytes:
-    """
-    Sign a 32-byte message hash with secp256k1.
-    Returns a 65-byte recoverable signature: [recovery_id] + r (32) + s (32).
-    """
     priv_int = int.from_bytes(priv_bytes, "big")
-    z        = int.from_bytes(msg_hash,   "big")
+    z        = int.from_bytes(msg_hash, "big")
     k        = _rfc6979_k(priv_int, msg_hash)
     R        = _point_mul(_G, k)
-    assert R is not None, "Point multiplication resulted in point at infinity"
-    r        = R[0] % _N
-    s        = (_modinv(k, _N) * (z + r * priv_int)) % _N
-    # Low-S normalisation (BIP-62)
-    if s > _N // 2:
-        s = _N - s
-    recovery_id = R[1] & 1
-    return bytes([recovery_id]) + r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    assert R is not None
+    r = R[0] % _N
+    s = (_modinv(k, _N) * (z + r * priv_int)) % _N
+    if s > _N // 2: s = _N - s
+    return bytes([R[1] & 1]) + r.to_bytes(32, "big") + s.to_bytes(32, "big")
 
-
-# ── Clarity value serialisation ────────────────────────────────────────────────
 
 def _cv_uint128(value: int) -> bytes:
-    """Clarity UInt — type 0x01, 16-byte big-endian."""
     return b"\x01" + value.to_bytes(16, "big")
 
-
 def _cv_standard_principal(address: str) -> bytes:
-    """Clarity StandardPrincipal — type 0x05, version (1), hash160 (20)."""
     version, h160 = _parse_stacks_address(address)
     return b"\x05" + bytes([version]) + h160
 
-
 def _cv_none() -> bytes:
-    """Clarity (none) — type 0x09."""
     return b"\x09"
 
-
 def _cv_some(inner: bytes) -> bytes:
-    """Clarity (some val) — type 0x0a."""
     return b"\x0a" + inner
 
-
 def _cv_buff(data: bytes) -> bytes:
-    """Clarity buffer — type 0x02, length (4), data."""
     return b"\x02" + struct.pack(">I", len(data)) + data
 
-
-# ── Transaction wire format ────────────────────────────────────────────────────
 
 def _payload_contract_call(
     contract_address: str,
@@ -247,10 +196,10 @@ def _payload_contract_call(
     name_b = contract_name.encode()
     fn_b   = function_name.encode()
     out    = bytes([PAYLOAD_CONTRACT_CALL])
-    out   += bytes([version]) + h160                        # contract address (21 bytes)
-    out   += struct.pack(">B", len(name_b)) + name_b        # contract name length-prefixed
-    out   += struct.pack(">B", len(fn_b))   + fn_b          # function name length-prefixed
-    out   += struct.pack(">I", len(function_args))          # arg count (4 bytes)
+    out   += bytes([version]) + h160
+    out   += struct.pack(">B", len(name_b)) + name_b
+    out   += struct.pack(">B", len(fn_b))   + fn_b
+    out   += struct.pack(">I", len(function_args))
     for arg in function_args:
         out += arg
     return out
@@ -258,11 +207,10 @@ def _payload_contract_call(
 
 def _payload_stx_transfer(recipient: str, amount_ustx: int) -> bytes:
     version, h160 = _parse_stacks_address(recipient)
-    memo_padded   = b"\x00" * 34
     out  = bytes([PAYLOAD_TOKEN_TRANSFER])
-    out += b"\x05" + bytes([version]) + h160    # RecipientPrincipal (standard)
-    out += struct.pack(">Q", amount_ustx)        # amount (8 bytes)
-    out += memo_padded                           # memo (34 bytes)
+    out += b"\x05" + bytes([version]) + h160
+    out += struct.pack(">Q", amount_ustx)
+    out += b"\x00" * 34   # memo
     return out
 
 
@@ -272,34 +220,38 @@ def _spending_condition(
     fee: int,
     sig65: bytes = b"\x00" * 65,
 ) -> bytes:
+    """
+    Build a spending condition.
+    - signer is ALWAYS hash160(pub_bytes) — never zeroed
+    - sig65 is b"\\x00"*65 when building the tx for presig hashing,
+      and the real 65-byte signature in the final broadcast tx
+    """
     out  = bytes([HASH_MODE_P2PKH])
-    out += _hash160(pub_bytes)          # signer (20 bytes)
-    out += struct.pack(">Q", nonce)     # nonce (8 bytes)
-    out += struct.pack(">Q", fee)       # fee   (8 bytes)
+    out += _hash160(pub_bytes)       # signer = hash160(pubkey) always
+    out += struct.pack(">Q", nonce)
+    out += struct.pack(">Q", fee)
     out += bytes([KEY_ENCODING_COMPRESSED])
-    out += sig65                        # signature (65 bytes)
+    out += sig65
     return out
 
 
 def _build_tx(payload: bytes, spending_cond: bytes, testnet: bool) -> bytes:
-    version  = TX_VERSION_TESTNET  if testnet else TX_VERSION_MAINNET
-    chain_id = CHAIN_ID_TESTNET    if testnet else CHAIN_ID_MAINNET
+    version  = TX_VERSION_TESTNET if testnet else TX_VERSION_MAINNET
+    chain_id = CHAIN_ID_TESTNET   if testnet else CHAIN_ID_MAINNET
     out  = bytes([version])
     out += struct.pack(">I", chain_id)
     out += bytes([AUTH_STANDARD]) + spending_cond
     out += bytes([ANCHOR_ANY])
     out += bytes([POST_COND_ALLOW])
-    out += struct.pack(">I", 0)          # zero post-conditions
+    out += struct.pack(">I", 0)
     out += payload
     return out
 
 
 def _presig_hash(tx_bytes: bytes) -> bytes:
-    """Stacks presig hash: sha512/256(tx_bytes || SIGHASH_ALL)."""
+    """sha512/256(tx_with_zeroed_sig || SIGHASH_ALL)"""
     return _sha512_256(tx_bytes + SIGHASH_ALL)
 
-
-# ── Nonce helper ───────────────────────────────────────────────────────────────
 
 def _fetch_nonce(address: str, api_base: str) -> int:
     try:
@@ -309,21 +261,18 @@ def _fetch_nonce(address: str, api_base: str) -> int:
             timeout=15,
         )
         resp.raise_for_status()
-        data = resp.json()
-        return int(data.get("nonce", 0))
+        return int(resp.json().get("nonce", 0))
     except Exception as exc:
         logger.warning("[StacksTx] Could not fetch nonce for %s (using 0): %s", address[:16], exc)
         return 0
 
 
 def _priv_to_pub_bytes(private_key_hex: str) -> bytes:
-    """Convert hex private key to compressed public key bytes."""
     clean = private_key_hex[2:] if private_key_hex.startswith("0x") else private_key_hex
     if len(clean) == 66 and clean.endswith("01"):
         clean = clean[:64]
-    priv_bytes = bytes.fromhex(clean)
-    priv_int   = int.from_bytes(priv_bytes, "big")
-    key_obj    = ec.derive_private_key(priv_int, ec.SECP256K1(), default_backend())
+    priv_int = int.from_bytes(bytes.fromhex(clean), "big")
+    key_obj  = ec.derive_private_key(priv_int, ec.SECP256K1(), default_backend())
     return key_obj.public_key().public_bytes(
         serialization.Encoding.X962,
         serialization.PublicFormat.CompressedPoint,
@@ -331,14 +280,11 @@ def _priv_to_pub_bytes(private_key_hex: str) -> bytes:
 
 
 def _priv_raw_bytes(private_key_hex: str) -> bytes:
-    """Return the raw 32-byte private key."""
     clean = private_key_hex[2:] if private_key_hex.startswith("0x") else private_key_hex
     if len(clean) == 66 and clean.endswith("01"):
         clean = clean[:64]
     return bytes.fromhex(clean)
 
-
-# ── Public API ────────────────────────────────────────────────────────────────
 
 def build_and_broadcast_sip010_transfer(
     *,
@@ -352,26 +298,6 @@ def build_and_broadcast_sip010_transfer(
     memo: Optional[bytes] = None,
     api_base: Optional[str] = None,
 ) -> dict:
-    """
-    Build, sign, and broadcast a SIP-010 token transfer.
-
-    Args:
-        private_key_hex:   Hex 32-byte (or 33-byte compressed) secp256k1 private key
-        recipient_address: Destination Stacks principal (ST... / SP...)
-        amount_atomic:     Token amount in smallest unit (6 decimals for USDCx)
-        contract_address:  SIP-010 contract publisher principal
-        contract_name:     SIP-010 contract name e.g. "usdcx-token"
-        testnet:           True for Stacks Testnet, False for Mainnet
-        fee_ustx:          Fee in micro-STX (default 1000 = 0.001 STX)
-        memo:              Optional bytes memo (max 34 bytes)
-        api_base:          Override Stacks API URL
-
-    Returns:
-        dict: { success: True, txid: str, network: str }
-
-    Raises:
-        ValueError on broadcast failure
-    """
     pub_bytes  = _priv_to_pub_bytes(private_key_hex)
     priv_bytes = _priv_raw_bytes(private_key_hex)
     sender     = principal_from_private_key(private_key_hex, testnet=testnet)
@@ -383,7 +309,6 @@ def build_and_broadcast_sip010_transfer(
         sender[:20], nonce, recipient_address[:20], amount_atomic,
     )
 
-    # SIP-010 transfer(amount uint, sender principal, recipient principal, memo optional<buff>)
     args: list[bytes] = [
         _cv_uint128(amount_atomic),
         _cv_standard_principal(sender),
@@ -391,12 +316,19 @@ def build_and_broadcast_sip010_transfer(
         _cv_none() if not memo else _cv_some(_cv_buff(memo[:34])),
     ]
 
-    payload    = _payload_contract_call(contract_address, contract_name, "transfer", args)
-    empty_sc   = _spending_condition(pub_bytes, nonce, fee_ustx)
-    unsigned   = _build_tx(payload, empty_sc, testnet)
-    sig65      = _sign_recoverable(priv_bytes, _presig_hash(unsigned))
-    signed_sc  = _spending_condition(pub_bytes, nonce, fee_ustx, sig65)
-    signed_tx  = _build_tx(payload, signed_sc, testnet)
+    payload = _payload_contract_call(contract_address, contract_name, "transfer", args)
+
+    # Step 1: build tx with real signer hash but zeroed signature → compute presig hash
+    unsigned_sc = _spending_condition(pub_bytes, nonce, fee_ustx)   # sig = zeros
+    unsigned_tx = _build_tx(payload, unsigned_sc, testnet)
+    presig      = _presig_hash(unsigned_tx)
+
+    # Step 2: sign the presig hash
+    sig65 = _sign_recoverable(priv_bytes, presig)
+
+    # Step 3: build final tx with real signature
+    signed_sc = _spending_condition(pub_bytes, nonce, fee_ustx, sig65)
+    signed_tx = _build_tx(payload, signed_sc, testnet)
 
     resp = requests.post(
         f"{api}/v2/transactions",
@@ -405,17 +337,11 @@ def build_and_broadcast_sip010_transfer(
         timeout=30,
     )
     if not resp.ok:
-        raise ValueError(
-            f"Broadcast failed (HTTP {resp.status_code}): {resp.text[:400]}"
-        )
+        raise ValueError(f"Broadcast failed (HTTP {resp.status_code}): {resp.text[:400]}")
+
     txid = resp.text.strip().strip('"')
     logger.info("[StacksTx] ✓ txid: %s", txid)
-    return {
-        "success": True,
-        "txid":    txid,
-        "txHash":  txid,
-        "network": "testnet" if testnet else "mainnet",
-    }
+    return {"success": True, "txid": txid, "txHash": txid, "network": "testnet" if testnet else "mainnet"}
 
 
 def build_and_broadcast_stx_transfer(
@@ -427,21 +353,6 @@ def build_and_broadcast_stx_transfer(
     fee_ustx: int = 200,
     api_base: Optional[str] = None,
 ) -> dict:
-    """
-    Build, sign, and broadcast a plain STX transfer.
-    Used to drip fee STX to the burner principal before settlement.
-
-    Args:
-        private_key_hex:   Master wallet private key (holds testnet STX)
-        recipient_address: Burner principal to receive STX
-        amount_ustx:       Amount in micro-STX (1 STX = 1_000_000 μSTX)
-        testnet:           True for testnet
-        fee_ustx:          Fee in micro-STX (default 200)
-        api_base:          Override Stacks API URL
-
-    Returns:
-        dict: { success: True, txid: str }
-    """
     pub_bytes  = _priv_to_pub_bytes(private_key_hex)
     priv_bytes = _priv_raw_bytes(private_key_hex)
     sender     = principal_from_private_key(private_key_hex, testnet=testnet)
@@ -453,12 +364,14 @@ def build_and_broadcast_stx_transfer(
         sender[:20], nonce, recipient_address[:20], amount_ustx,
     )
 
-    payload   = _payload_stx_transfer(recipient_address, amount_ustx)
-    empty_sc  = _spending_condition(pub_bytes, nonce, fee_ustx)
-    unsigned  = _build_tx(payload, empty_sc, testnet)
-    sig65     = _sign_recoverable(priv_bytes, _presig_hash(unsigned))
-    signed_sc = _spending_condition(pub_bytes, nonce, fee_ustx, sig65)
-    signed_tx = _build_tx(payload, signed_sc, testnet)
+    payload = _payload_stx_transfer(recipient_address, amount_ustx)
+
+    unsigned_sc = _spending_condition(pub_bytes, nonce, fee_ustx)
+    unsigned_tx = _build_tx(payload, unsigned_sc, testnet)
+    presig      = _presig_hash(unsigned_tx)
+    sig65       = _sign_recoverable(priv_bytes, presig)
+    signed_sc   = _spending_condition(pub_bytes, nonce, fee_ustx, sig65)
+    signed_tx   = _build_tx(payload, signed_sc, testnet)
 
     resp = requests.post(
         f"{api}/v2/transactions",
@@ -467,9 +380,8 @@ def build_and_broadcast_stx_transfer(
         timeout=30,
     )
     if not resp.ok:
-        raise ValueError(
-            f"STX drip broadcast failed (HTTP {resp.status_code}): {resp.text[:300]}"
-        )
+        raise ValueError(f"STX drip broadcast failed (HTTP {resp.status_code}): {resp.text[:300]}")
+
     txid = resp.text.strip().strip('"')
     logger.info("[StacksTx] STX drip ✓ txid: %s", txid)
     return {"success": True, "txid": txid}

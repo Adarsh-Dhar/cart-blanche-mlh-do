@@ -73,7 +73,7 @@ function encryptPrivateKey(privateKeyHex: string, ownerPrincipal: string): strin
 }
 
 // ── Private key extraction ────────────────────────────────────────────────────
-// Strip trailing "01" compression flag (66 hex chars → 64) before use.
+// ── Private key extraction ────────────────────────────────────────────────────
 function extractPrivKeyHex(privKey: unknown): string {
   let hex: string;
   if (typeof privKey === "string") {
@@ -84,9 +84,28 @@ function extractPrivKeyHex(privKey: unknown): string {
     else if (typeof pk.data === "string") hex = pk.data;
     else throw new Error("Cannot extract private key hex from makeRandomPrivKey result");
   }
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  // 33 bytes with compression flag → strip to 32 bytes
-  return clean.length === 66 && clean.endsWith("01") ? clean.slice(0, 64) : clean;
+  
+  // Remove "0x" prefix if present
+  let clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+
+  // Stacks requires a 33-byte (66 hex char) compressed key.
+  // A raw key is 32 bytes (64 hex chars).
+  // If it's exactly 64 chars, it's missing the compression flag.
+  if (clean.length === 64) {
+    clean += "01"; 
+  }
+  
+  // If it's shorter than 64, it lost leading zeros during hex conversion. Pad it.
+  if (clean.length < 64) {
+     clean = clean.padStart(64, "0") + "01";
+  }
+
+  // Ensure it is exactly 66 characters before returning
+  if (clean.length !== 66) {
+      console.warn(`[BurnerWallet] Unexpected private key length: ${clean.length} chars. Key: ${clean}`);
+  }
+
+  return clean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
