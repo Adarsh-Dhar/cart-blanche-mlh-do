@@ -21,7 +21,7 @@ interface TransactionReceiptProps {
   };
 }
 
-const SKALE_EXPLORER_URL = 'https://base-sepolia-testnet-explorer.skalenodes.com/tx/';
+const SKALE_EXPLORER_URL = 'https://explorer.hiro.so/txid//';
 
 export function TransactionReceipt({ receipt }: TransactionReceiptProps) {
   // Extract list: handle both batch array and single hashes

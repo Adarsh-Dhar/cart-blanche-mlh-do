@@ -1,23 +1,6 @@
 """
 tool/x402_settlement.py — Stacks Blockchain Settlement (SIP-010)
 =================================================================
-
-FIX: Replaced broken pure-Python signer with Node.js subprocess call using
-the official @stacks/transactions SDK. The pure-Python builder produced a
-"Signer hash does not equal hash of public key" error because the hash160
-computed from the derived public key didn't match what Stacks expected —
-a subtle key encoding edge case in the custom EC implementation.
-
-The Node.js script (server/tool/stacks_transfer.mjs) handles all signing
-using the same SDK that @stacks/connect uses in the frontend.
-
-Architecture:
-  - Python reads the burner wallet record and decrypts the private key
-  - Python spawns `node stacks_transfer.mjs '<json>'` as a subprocess
-  - The Node.js script builds, signs, and broadcasts the SIP-010 tx
-  - Python parses the JSON result and builds the receipt
-
-XOR encryption key = sha256(stacksPrincipal) — mirrors useBurnerwallet.ts
 """
 
 from __future__ import annotations
@@ -72,6 +55,39 @@ def _find_node() -> str:
     return node
 
 
+def _validate_stacks_address(address: str) -> bool:
+    """
+    Validate a Stacks c32check address.
+
+    Valid Stacks standard principal addresses are EXACTLY 41 characters:
+      S  (1 char, literal)
+      + version char (1 char, encodes the address type):
+          T → testnet P2PKH
+          P → mainnet P2PKH
+          N → testnet P2SH
+          M → mainnet P2SH
+          G → other
+      + 38 c32-encoded chars (hash160 + 4-byte checksum)
+
+    Contract principals like "ST...ADDR.contract-name" are NOT valid here
+    since we need a bare principal for token transfer.
+    """
+    if not address or not isinstance(address, str):
+        return False
+    # Must start with 'S'
+    if address[0] != "S":
+        return False
+    # Second char is the version encoding
+    if len(address) < 2 or address[1] not in ("T", "P", "N", "M", "G"):
+        return False
+    # Must be exactly 41 characters total
+    if len(address) != 41:
+        return False
+    # All remaining chars must be valid c32 characters
+    c32_chars = set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+    return all(c in c32_chars for c in address[2:])
+
+
 # ── XOR decryption using sha256 (mirrors frontend useBurnerwallet.ts) ─────────
 def _decrypt_burner_key(encrypted_hex: str, owner_principal: str) -> str:
     """
@@ -107,9 +123,6 @@ def _drip_stx_sync(burner_address: str) -> None:
         logger.debug("[X402] No MASTER_STACKS_PRIVATE_KEY — skipping STX drip.")
         return
 
-    # STX transfer via the pure Python builder is fine for drip since it's
-    # less security-critical; we just need a small amount to cover fees.
-    # If it fails, log and continue — non-fatal.
     try:
         from . import stack_tx_builder as stacks_builder
         result = stacks_builder.build_and_broadcast_stx_transfer(
@@ -133,7 +146,7 @@ def _call_node_transfer(
     ) -> dict:
     """
     Synchronous SIP-010 transfer via Node.js subprocess.
-    Uses the official @stacks/transactions SDK — no more signing bugs.
+    Uses the official @stacks/transactions SDK.
 
     Returns: { "txid": "...", "success": True }
     Raises:  RuntimeError on any failure.
@@ -146,7 +159,6 @@ def _call_node_transfer(
             "Copy stacks_transfer.mjs to server/tool/ and run 'npm install' there."
         )
 
-    # Check node_modules exist in the script's directory
     node_modules = _TRANSFER_SCRIPT.parent / "node_modules"
     if not node_modules.exists():
         raise RuntimeError(
@@ -164,6 +176,8 @@ def _call_node_transfer(
         "network":           STACKS_NETWORK,
     })
 
+    print(f"[X402] payload: {payload}")
+
     logger.debug(
         "[X402] node %s — recipient=%s amount=%d contract=%s.%s",
         _TRANSFER_SCRIPT.name, recipient_address[:16], amount_atomic,
@@ -175,7 +189,7 @@ def _call_node_transfer(
             [node, str(_TRANSFER_SCRIPT), payload],
             capture_output=True,
             text=True,
-            timeout=60,  # 60-second timeout per tx
+            timeout=60,
             cwd=str(_TRANSFER_SCRIPT.parent),
         )
     except subprocess.TimeoutExpired:
@@ -183,12 +197,10 @@ def _call_node_transfer(
     except FileNotFoundError as exc:
         raise RuntimeError(f"Could not execute Node.js: {exc}") from exc
 
-    # Parse stdout
     stdout = proc.stdout.strip()
     stderr = proc.stderr.strip()
 
     if proc.returncode != 0:
-        # Try to parse structured error from stderr
         err_msg = stderr or stdout or f"node exited with code {proc.returncode}"
         try:
             err_data = json.loads(stderr or stdout)
@@ -204,7 +216,6 @@ def _call_node_transfer(
         raise RuntimeError(f"No output from Stacks transfer script. stderr: {stderr}")
 
     try:
-        # The node script prints the JSON on the last line
         output_str = stdout.split("\n")[-1]
         result = json.loads(output_str)
     except json.JSONDecodeError as exc:
@@ -272,12 +283,17 @@ class X402SettlementTool:
                 "Visit /wallet to deposit USDCx and authorize the agent."
             )
 
-        burner_address = burner_record.smartWalletAddress   # Stacks principal
-        owner_principal = burner_record.ownerEoa            # Stacks principal stored in ownerEoa
+        burner_address = burner_record.smartWalletAddress
+        # Explicitly check sender address length
+        if not isinstance(burner_address, str) or len(burner_address) != 41:
+            raise ValueError(
+                f"Burner sender address is invalid: '{burner_address}' (length={len(burner_address) if burner_address else 'None'}, expected exactly 41). "
+                "This is likely a bug in wallet generation or storage."
+            )
+        owner_principal = burner_record.ownerEoa
         spend_limit_usdc = float(burner_record.spendLimitUsdc or DEFAULT_SPEND_LIMIT)
         funding_asset: str = getattr(burner_record, "fundingAsset", None) or "USDCx"
 
-        # Normalise total cart amount
         total_cart_raw = float(
             cart_mandate.get("amount")
             or cart_mandate.get("total_budget_amount")
@@ -314,7 +330,6 @@ class X402SettlementTool:
             None, _drip_stx_sync, burner_address
         )
 
-        # Brief pause to allow Stacks mempool to register STX drip
         await asyncio.sleep(3)
 
         # ── Settle each vendor via Node.js ────────────────────────────────────
@@ -335,24 +350,26 @@ class X402SettlementTool:
                 i + 1, len(merchants), vendor.get("name"), usd_amt, amount_atomic, funding_asset,
             )
 
-            # Validate Stacks c32check address format
-            # Valid Stacks testnet: starts with "ST", 40-41 chars
-            # Valid Stacks mainnet: starts with "SP", 40-41 chars
-            is_valid_stacks_addr = (
-                vendor_principal
-                and vendor_principal[:2] in ("ST", "SP")
-                and 40 <= len(vendor_principal) <= 42
-            )
-
-            if not is_valid_stacks_addr:
-                # Try the fallback from the DB deployer address rather than failing
-                logger.warning(
-                    "[X402] Invalid Stacks address '%s' for vendor '%s' — substituting fallback",
-                    vendor_principal, vendor.get("name"),
+            # ── FIX: Strict Stacks address validation ─────────────────────────
+            # Valid Stacks addresses are EXACTLY 41 characters.
+            # Do NOT substitute a fallback address — fail clearly so the operator
+            # knows to fix the vendor's pubkey in the admin panel.
+            if not _validate_stacks_address(vendor_principal):
+                error_msg = (
+                    f"Invalid Stacks address for vendor '{vendor.get('name')}': "
+                    f"'{vendor_principal}' "
+                    f"(length={len(vendor_principal)}, expected exactly 41). "
+                    f"Fix this vendor's pubkey in /admin/vendors."
                 )
-                vendor_principal = USDCX_CONTRACT_ADDRESS  # deployer is a known-valid address
+                logger.error("[X402] %s", error_msg)
+                failures.append({
+                    "commodity":  vendor.get("name", "Unknown"),
+                    "amount_usd": usd_amt,
+                    "error":      error_msg,
+                })
+                continue
 
-            # Diagnostic log: print actual address being sent to Node.js
+            # Diagnostic log
             logger.info(
                 "[X402] Sending to Node.js — vendor: %s, address: '%s', len: %d",
                 vendor.get("name"), vendor_principal, len(vendor_principal)
@@ -368,7 +385,6 @@ class X402SettlementTool:
                 continue
 
             try:
-                # Run Node.js transfer in thread executor to avoid blocking the event loop
                 result = await loop.run_in_executor(
                     None,
                     _call_node_transfer,
