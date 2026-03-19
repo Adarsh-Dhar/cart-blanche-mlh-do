@@ -43,17 +43,11 @@ STACKS_NETWORK = os.environ.get("STACKS_NETWORK", "testnet")  # "testnet" | "mai
 IS_TESTNET = STACKS_NETWORK == "testnet"
 
 # ── SIP-010 contract addresses (must match lib/stacks-config.ts) ───────────────
-USDCX_CONTRACT_ADDRESS = os.environ.get(
-    "USDCX_CONTRACT_ADDRESS",
-    "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4",
-)
-USDCX_CONTRACT_NAME = os.environ.get("USDCX_CONTRACT_NAME", "usdcx-token")
+USDCX_CONTRACT_ADDRESS = os.environ.get("USDCX_CONTRACT_ADDRESS") or "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4"
+USDCX_CONTRACT_NAME = os.environ.get("USDCX_CONTRACT_NAME") or "usdcx-token"
 
-SBTC_CONTRACT_ADDRESS = os.environ.get(
-    "SBTC_CONTRACT_ADDRESS",
-    "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4",
-)
-SBTC_CONTRACT_NAME = os.environ.get("SBTC_CONTRACT_NAME", "sbtc-token")
+SBTC_CONTRACT_ADDRESS = os.environ.get("SBTC_CONTRACT_ADDRESS") or "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4"
+SBTC_CONTRACT_NAME = os.environ.get("SBTC_CONTRACT_NAME") or "sbtc-token"
 
 # Master Stacks wallet (holds STX for dripping to burners)
 MASTER_STACKS_PRIVATE_KEY = os.environ.get("MASTER_STACKS_PRIVATE_KEY", "")
@@ -159,9 +153,10 @@ def _call_node_transfer(
         )
 
     payload = json.dumps({
+        "type":              "sip010", # FIX: Added type
         "private_key":       private_key,
-        "recipient_address": recipient_address,
-        "amount_atomic":     amount_atomic,
+        "recipient":         recipient_address, # FIX: Changed to recipient to match mjs script
+        "amount":            amount_atomic, # FIX: Changed to amount to match mjs script
         "contract_address":  contract_address,
         "contract_name":     contract_name,
         "network":           STACKS_NETWORK,
@@ -207,7 +202,9 @@ def _call_node_transfer(
         raise RuntimeError(f"No output from Stacks transfer script. stderr: {stderr}")
 
     try:
-        result = json.loads(stdout)
+        # The node script prints the JSON on the last line
+        output_str = stdout.split("\n")[-1]
+        result = json.loads(output_str)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid JSON from transfer script: {stdout[:200]}") from exc
 
@@ -315,7 +312,7 @@ class X402SettlementTool:
             None, _drip_stx_sync, burner_address
         )
 
-            # Brief pause to allow Stacks mempool to register STX drip
+        # Brief pause to allow Stacks mempool to register STX drip
         await asyncio.sleep(3)
 
         # ── Settle each vendor via Node.js ────────────────────────────────────
