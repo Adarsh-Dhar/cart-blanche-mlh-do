@@ -14,7 +14,7 @@ from server.state import AgentState
 from server.db import get_db
 
 logger = logging.getLogger(__name__)
-_FALLBACK = "0xFe5e03799Fe833D93e950d22406F9aD901Ff3Bb9"
+_FALLBACK = "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4"  # Stacks testnet fallback — replace with your own registered merchant address
 _CHAIN_ID = 84532
 
 

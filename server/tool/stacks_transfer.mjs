@@ -40,8 +40,11 @@ async function main() {
             anchorMode: AnchorMode.Any,
         });
     } else if (type === "sip010") {
-        const senderAddress = getAddressFromPrivateKey(private_key, TransactionVersion.Testnet);
-        
+        // Use the address provided by Python (derived by frontend SDK v8)
+        // Avoids SDK v6/v8 incompatibility in getAddressFromPrivateKey
+        const senderAddress = (data.sender_address || "").trim() || 
+            getAddressFromPrivateKey(private_key, TransactionVersion.Testnet);
+
         transaction = await makeContractCall({
             contractAddress: contract_address,
             contractName: contract_name,
