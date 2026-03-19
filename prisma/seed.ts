@@ -12,67 +12,67 @@ async function main() {
   // ── 1. VENDORS ─────────────────────────────────────────────────────────────
 
   const infraVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'ST3GA9VQKYW677PDQHMBEEK3G53343N5YY7JWN7J1' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "BitCompute Cloud",
       description: "High-performance GPU credits, API throughput vouchers, and cloud storage.",
-      pubkey: 'ST3GA9VQKYW677PDQHMBEEK3G53343N5YY7JWN7J1',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/0000FF?text=BitCompute",
     },
   });
 
   const creativeVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'ST1F5VZCFZD8YKYH5B2ZRCYDMK54P7E7YX0Q45EPE' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "AssetStream Digital",
       description: "Premium UI kits, 3D assets, fonts, stock media, and motion graphics.",
-      pubkey: 'ST1F5VZCFZD8YKYH5B2ZRCYDMK54P7E7YX0Q45EPE',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/FF00FF?text=AssetStream",
     },
   });
 
   const softwareVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'ST2WSR4ACNNH0D50GA38ACG4B56ZGX12F7BW1YD8K' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "DevVault Pro",
       description: "SaaS licenses, IDE plugins, deployment credits, and developer certifications.",
-      pubkey: 'ST2WSR4ACNNH0D50GA38ACG4B56ZGX12F7BW1YD8K',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/00FF00?text=DevVault",
     },
   });
 
   const aiVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'ST2EPX5MCS97MRBWF4XA9WMT3843Q35X4ZA3EGN0R' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "NeuralForge AI",
       description: "AI model access vouchers, fine-tuning credits, prompt packs, and AI toolkits.",
-      pubkey: 'ST2EPX5MCS97MRBWF4XA9WMT3843Q35X4ZA3EGN0R',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/FF6600?text=NeuralForge",
     },
   });
 
   const eduVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'STYXTJYZ857ZC4ARZ2EHNPG4YRJ2WD090JMB09CT' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "LearnChain Academy",
       description: "Certification vouchers, online course bundles, and skill bootcamps.",
-      pubkey: 'STYXTJYZ857ZC4ARZ2EHNPG4YRJ2WD090JMB09CT',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/00CCFF?text=LearnChain",
     },
   });
 
   const securityVendor = await prisma.vendor.upsert({
-    where: { pubkey: 'STN2CBVQ6S2QGY27DM30281XV2NCS3GEQ2YQCCQ3' },
+    where: { pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4' },
     update: {},
     create: {
       name: "CipherStack Security",
       description: "Cybersecurity tools, VPN subscriptions, pen-testing kits, and compliance packs.",
-      pubkey: 'STN2CBVQ6S2QGY27DM30281XV2NCS3GEQ2YQCCQ3',
+      pubkey: 'ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4',
       logoUrl: "https://api.placeholder.com/150/CC0000?text=CipherStack",
     },
   });

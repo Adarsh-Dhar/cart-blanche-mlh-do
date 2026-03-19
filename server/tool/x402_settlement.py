@@ -315,6 +315,9 @@ class X402SettlementTool:
             None, _drip_stx_sync, burner_address
         )
 
+            # Brief pause to allow Stacks mempool to register STX drip
+        await asyncio.sleep(3)
+
         # ── Settle each vendor via Node.js ────────────────────────────────────
         receipts: list[dict] = []
         failures: list[dict] = []

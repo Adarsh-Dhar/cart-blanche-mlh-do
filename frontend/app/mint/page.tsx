@@ -134,8 +134,14 @@ export default function MintPage() {
   // ── Connect wallet ───────────────────────────────────────────────────────────
   const connectWallet = useCallback(() => {
     setStatus("connecting");
+    let timeout = setTimeout(() => {
+      setStatus("idle");
+      setError("Wallet connection timed out. Please check your extension and try again.");
+    }, 15000); // 15 seconds timeout
+
     connect()
       .then((res) => {
+        clearTimeout(timeout);
         const addr = extractStacksAddress(res);
         if (addr) {
           setStacksAddress(addr);
@@ -145,7 +151,11 @@ export default function MintPage() {
           setStatus("error");
         }
       })
-      .catch(() => setStatus("idle"));
+      .catch(() => {
+        clearTimeout(timeout);
+        setStatus("idle");
+        setError("Wallet connection failed.");
+      });
   }, []);
 
   // ── Fetch balance ────────────────────────────────────────────────────────────
