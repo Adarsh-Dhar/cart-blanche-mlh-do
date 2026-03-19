@@ -306,7 +306,7 @@ function ReceiptCard({ data }: { data: any }) {
       {/* Footer */}
       <div style={{ padding: "10px 16px 14px", borderTop: `1px solid ${headerBorder}`, display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: headerColor, boxShadow: `0 0 8px ${headerColor}` }} />
-        <span style={{ fontSize: 11, color: "#0e7490" }}>SKALE Base Sepolia · Smart Wallet · ERC-4337</span>
+          <span style={{ fontSize: 11, color: "#0e7490" }}>{data.network || "Stacks Testnet"} · Burner Wallet · SIP-010</span>
       </div>
     </div>
   );

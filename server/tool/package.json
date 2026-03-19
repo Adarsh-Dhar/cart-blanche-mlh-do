@@ -1,0 +1,13 @@
+{
+  "name": "stacks-transfer-tool",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SIP-010 transfer helper for Cart-Blanche settlement agent",
+  "scripts": {
+    "install-deps": "npm install"
+  },
+  "dependencies": {
+    "@stacks/transactions": "^6.17.0",
+    "@stacks/network": "^6.13.0"
+  }
+}
