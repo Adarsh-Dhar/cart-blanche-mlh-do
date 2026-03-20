@@ -26,12 +26,14 @@ import {
   Lock,
   Bitcoin,
   Coins,
+  Bot,
 } from "lucide-react";
 import {
   useBurnerWallet,
   type BurnerWalletInfo,
   type FundingAsset,
 } from "@/hooks/useBurnerwallet";
+import Link from "next/link";
 
 // ── Connect result type ────────────────────────────────────────────────────────
 interface ConnectResult {
@@ -251,6 +253,56 @@ export default function WalletPage() {
       />
 
       <div style={{ maxWidth: 720, margin: "0 auto", position: "relative" }}>
+        {/* Back to Chat Button */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 24 }}>
+          <Link href="/chat" style={{ textDecoration: "none" }}>
+            <button
+              style={{
+                padding: "10px 22px",
+                background: "#1a2332",
+                border: "none",
+                borderRadius: 12,
+                color: "#e2e8f0",
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "'Syne', sans-serif",
+                cursor: "pointer",
+                boxShadow: "0 0 24px #1a2332",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Bot size={16} />
+              Back to Chat
+            </button>
+          </Link>
+        </div>
+        {/* Mint USDCx Button */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 24 }}>
+          <Link href="/mint" style={{ textDecoration: "none" }}>
+            <button
+              style={{
+                padding: "10px 22px",
+                background: "hsl(66,100%,50%)",
+                border: "none",
+                borderRadius: 12,
+                color: "#000",
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "'Syne', sans-serif",
+                cursor: "pointer",
+                boxShadow: "0 0 24px hsl(66,100%,50%,0.2)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Coins size={16} />
+              Mint USDCx
+            </button>
+          </Link>
+        </div>
 
         {/* ── Header ────────────────────────────────────────────────────────── */}
         <div style={{ marginBottom: 40 }}>

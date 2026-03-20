@@ -21,7 +21,7 @@ interface TransactionReceiptProps {
   };
 }
 
-const STACKS_EXPLORER_URL = 'https://explorer.hiro.so/txid//';
+const STACKS_EXPLORER_URL = 'https://explorer.hiro.so/txid/';
 
 export function TransactionReceipt({ receipt }: TransactionReceiptProps) {
   // Extract list: handle both batch array and single hashes

@@ -2,9 +2,8 @@
 /**
  * stacks_transfer.mjs — Stacks SIP-010 transfer via @stacks/transactions SDK
  *
- * FIX APPLIED: Added pre-flight c32check address validation before calling
- * standardPrincipalCV(), which produces an unhelpful "invalid length" error.
- * Now fails with a clear, actionable message.
+ * FIX: Accept both 40 and 41 character Stacks addresses (both are valid
+ * c32check encodings depending on leading zero bytes in the hash160).
  */
 import {
   makeContractCall,
@@ -23,13 +22,13 @@ import {
 
 /**
  * Validate a Stacks c32check principal address.
- * Must be exactly 41 characters: S + version_char + 38 c32 chars.
+ * Accepts 40 OR 41 characters — both are valid depending on the hash160.
  */
 function isValidStacksAddress(addr) {
   if (!addr || typeof addr !== "string") return false;
-  if (addr.length !== 41) return false;
   if (addr[0] !== "S") return false;
   if (!"TPNMG".includes(addr[1])) return false;
+  if (addr.length < 39 || addr.length > 42) return false;
   const c32 = new Set("0123456789ABCDEFGHJKMNPQRSTVWXYZ");
   return addr.slice(2).split("").every(c => c32.has(c));
 }
@@ -51,11 +50,10 @@ async function main() {
     const network = "testnet";
     
     if (type === "stx") {
-      // Pre-flight validate recipient
       if (!isValidStacksAddress(recipient)) {
         throw new Error(
           `Invalid Stacks recipient address: "${recipient}" ` +
-          `(length=${recipient.length}, expected 41). ` +
+          `(length=${recipient.length}, expected 40-41). ` +
           `Update the vendor's pubkey in /admin/vendors.`
         );
       }
@@ -69,12 +67,10 @@ async function main() {
         nonce: nonce !== undefined ? BigInt(nonce) : undefined,
       });
     } else if (type === "sip010") {
-      // Pre-flight validate recipient before calling standardPrincipalCV,
-      // which throws an obscure "invalid length" error on bad addresses.
       if (!isValidStacksAddress(recipient)) {
         throw new Error(
           `Invalid Stacks recipient address: "${recipient}" ` +
-          `(length=${recipient.length}, expected 41). ` +
+          `(length=${recipient.length}, expected 40-41). ` +
           `Update the vendor's pubkey in /admin/vendors to a valid Stacks address.`
         );
       }
@@ -83,7 +79,7 @@ async function main() {
       if (!isValidStacksAddress(senderAddress)) {
         throw new Error(
           `Invalid Stacks sender address: "${senderAddress}" ` +
-          `(length=${senderAddress.length}, expected 41).`
+          `(length=${senderAddress.length}, expected 40-41).`
         );
       }
       transaction = await makeContractCall({

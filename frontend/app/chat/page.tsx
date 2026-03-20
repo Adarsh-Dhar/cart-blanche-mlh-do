@@ -264,7 +264,7 @@ function ReceiptCard({ data }: { data: any }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 10 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#22d3ee" }}>${(r.amount_usd || 0).toFixed(2)}</span>
-                <a href={`https://explorer.hiro.so/txid//${r.tx_hash}`} target="_blank" rel="noopener noreferrer"
+                <a href={`https://explorer.hiro.so/txid/0x${r.tx_hash}?chain`} target="_blank" rel="noopener noreferrer"
                   style={{ width: 24, height: 24, borderRadius: 6, background: "#22d3ee10", border: "1px solid #22d3ee25", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>
                   <ExternalLink size={11} color="#22d3ee" />
                 </a>
@@ -524,10 +524,26 @@ function WalletBanner() {
   }, []);
   if (active === null) return null;
   if (active) return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px", background: "#00ff9d0a", border: "1px solid #00ff9d25", borderRadius: 20, fontSize: 11, color: "#00ff9d" }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ff9d", boxShadow: "0 0 6px #00ff9d" }} />
-      Smart Wallet authorized — agent settles autonomously
-    </div>
+    <Link href="/wallet" style={{ textDecoration: "none" }}>
+      <button
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          padding: "5px 12px",
+          background: "#00ff9d0a",
+          border: "1px solid #00ff9d25",
+          borderRadius: 20,
+          fontSize: 11,
+          color: "#00ff9d",
+          cursor: "pointer",
+          transition: "all .15s"
+        }}
+      >
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ff9d", boxShadow: "0 0 6px #00ff9d" }} />
+        Go to Smart Wallet
+      </button>
+    </Link>
   );
   return (
     <Link href="/wallet" style={{ textDecoration: "none" }}>

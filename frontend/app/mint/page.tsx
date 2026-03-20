@@ -290,6 +290,31 @@ export default function MintPage() {
       />
 
       <div style={{ maxWidth: 680, margin: "0 auto", position: "relative" }}>
+        {/* Go back to Wallet Button */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 24 }}>
+          <Link href="/wallet" style={{ textDecoration: "none" }}>
+            <button
+              style={{
+                padding: "10px 22px",
+                background: "#1a2332",
+                border: "none",
+                borderRadius: 12,
+                color: "#e2e8f0",
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "'Syne', sans-serif",
+                cursor: "pointer",
+                boxShadow: "0 0 24px #1a2332",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Wallet size={16} />
+              Go back to Wallet
+            </button>
+          </Link>
+        </div>
 
         {/* Breadcrumb */}
         <div
@@ -918,7 +943,7 @@ export default function MintPage() {
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <a
-                href={`https://explorer.hiro.so/txid/${result.txId}?chain=testnet`}
+                href={`https://explorer.hiro.so/txid/0x${result.txId}?chain=testnet`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
