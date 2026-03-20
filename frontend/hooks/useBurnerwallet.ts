@@ -24,7 +24,6 @@ import {
   noneCV,
   AnchorMode,
   PostConditionMode,
-  TransactionVersion, // <-- ADD THIS
 } from "@stacks/transactions";
 import { openContractCall } from "@stacks/connect";
 import { STACKS_TESTNET } from "@stacks/network";
@@ -156,7 +155,7 @@ export function useBurnerWallet() {
         setStatus("generating");
         const rawPrivKey    = makeRandomPrivKey();
         const privKeyHex    = extractPrivKeyHex(rawPrivKey);
-        const burnerAddress = getAddressFromPrivateKey(privKeyHex, TransactionVersion.Testnet);
+        const burnerAddress = getAddressFromPrivateKey(privKeyHex, );
 
         if (!burnerAddress?.startsWith("S")) {
           throw new Error(`Generated invalid burner address: "${burnerAddress}"`);

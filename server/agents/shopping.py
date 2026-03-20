@@ -82,25 +82,23 @@ async def _search_term(term: str, alias_map: dict[str, list[str]]) -> list[dict]
                 
         if score > 0 and p.get("id") not in seen_ids:
             seen_ids.add(p.get("id"))
-            
-            # Safely extract nested properties
-            vendor_name = p.get("vendor", {}).get("name", "Unknown") if isinstance(p.get("vendor"), dict) else "Unknown"
-            vendor_address = p.get("vendor", {}).get("pubkey", "") if isinstance(p.get("vendor"), dict) else ""
-            category_name = p.get("category", {}).get("name", "") if isinstance(p.get("category"), dict) else ""
-            
+
+            # Raw products from catalog.py are already flattened — vendor/category
+            # are plain strings, not nested dicts. product_id key is "product_id".
             mapped_product = {
-                "id": p.get("id"),
-                "product_id": p.get("productID", ""),
-                "name": p.get("name", ""),
-                "description": p.get("description", ""),
-                "price": float(p.get("price", 0.0)),
-                "currency": "USD",
-                "vendor": vendor_name,
-                "merchant_address": vendor_address,
-                "category": category_name,
-                "stock": p.get("stockQuantity", 999),
-                "images": p.get("images", []),
-                "_relevance": score
+                "id":               p.get("id", ""),
+                "product_id":       p.get("product_id", ""),       # was "productID" — wrong key
+                "name":             p.get("name", ""),
+                "description":      p.get("description", ""),
+                "price":            float(p.get("price", 0.0)),
+                "currency":         p.get("currency", "USD"),
+                "vendor":           p.get("vendor", "Unknown"),    # already a string, not a dict
+                "vendor_id":        p.get("vendor_id", ""),
+                "merchant_address": p.get("merchant_address", ""), # already a flat key
+                "category":         p.get("category", ""),         # already a string
+                "stock":            p.get("stock", 999),           # was "stockQuantity" — wrong key
+                "images":           p.get("images", []),
+                "_relevance":       score,
             }
             results.append(mapped_product)
 
