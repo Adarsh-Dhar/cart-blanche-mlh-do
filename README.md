@@ -32,90 +32,90 @@ Powered by **Google Agent Development Kit (ADK)** and **Gemini 2.5 Flash**, the 
 ### Prerequisites
 * [Node.js](https://nodejs.org/) (v18+)
 * [Python](https://www.python.org/) (v3.10+)
-* MetaMask Extension installed in your browser
+# 🛒 Cart-Blanche
+**The Universal Orchestrator for the Autonomous Economy**
 
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/your-username/cart-blanche.git](https://github.com/your-username/cart-blanche.git)
-cd cart-blanche
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Stacks](https://img.shields.io/badge/Network-Stacks_Testnet-7026ff)](https://www.stacks.co/)
+[![Gemini](https://img.shields.io/badge/AI-Gemini_2.5_Flash-orange)](https://deepmind.google/technologies/gemini/)
+[![Protocol](https://img.shields.io/badge/Protocol-USDCx_/_UCP-blue)](https://github.com/adarsh-dhar/cart-blanche-nova-ai)
 
-```
-
-### 2. Environment Variables (`.env`)
-
-To run the backend agents and the settlement tool, you must configure your environment variables.
-
-Navigate to the `server` directory and duplicate the `.env.example` file to create your `.env` file:
-
-```bash
-cd server
-cp .env.example .env
-
-```
-
-Open `server/.env` and populate it with your actual credentials:
-
-```env
-# --- AI & Agent Config ---
-GEMINI_API_KEY="your_google_gemini_api_key_here"
-GOOGLE_SEARCH_API_KEY="your_google_search_api_key_here"
-
-# --- Blockchain / x402 Execution ---
-# The private key of the AGENT's wallet (Used to pay STACKS gas/micro-txs)
-# Do NOT use your personal mainnet wallet key here.
-STACKS_AGENT_PRIVATE_KEY="your_agent_wallet_private_key_here"
-
-
-```
+> **Cart-Blanche** transitions AI from a "passive chatbot that suggests" into an "active fiduciary that executes." Built for the **Buidl Battle**, it leverages the Stacks ecosystem to allow software to securely pay software without human micromanagement.
 
 ---
 
-## 🚀 How to Start the App
+## 🏗️ Architecture: The Agentic Loop
+Powered by the **Google Agent Development Kit (ADK)** and **Gemini**, the system utilizes a hierarchical multi-agent flow:
 
-We have provided a unified startup script that launches the Next.js frontend, the FastAPI Agent server, and the simulated Merchant Server all at once.
+1.  **Orchestrator Agent:** Decomposes complex goals (e.g., "Build a gaming YouTube setup") into specific products using a **Semantic Brainstorm RAG** to filter the live catalog.
+2.  **Shopping Agent:** Discovers real-time product data and verifies inventory via the **Universal Commerce Protocol (UCP)**.
+3.  **Merchant Agent:** Negotiates and generates a cryptographic `CartMandate` offer.
+4.  **Settlement Agent:** Executes the **x402 autonomous payment loop** on the Stacks network.
 
-From the **root directory** of the project, run:
+---
 
-```bash
-# 1. Make the script executable (Mac/Linux only)
-chmod +x start_all.sh
+## 🔐 Core Bitcoin L2 Integrations (Stacks)
 
-# 2. Run the startup script
-./start_all.sh
+### 1. x402 Autonomous Settlement via USDCx
+Cart-Blanche implements the **x402 standard** to handle Machine-to-Machine (M2M) micro-transactions. When an agent encounters an HTTP `402 Payment Required` challenge, the `X402SettlementTool` autonomously settles the debt using **USDCx** (bridged USDC on Stacks).
+* **SIP-010 Tokens:** Payments are processed using standard SIP-010 interfaces (USDCx and sBTC).
+* **Deterministic Settlement:** The tool predicts nonces and handles Stacks broadcast responses to ensure high-reliability execution.
 
+### 2. Secure Burner Wallet & Session Keys
+To enable autonomous spending without compromising a user's primary funds, we implement a **Burner Wallet** system:
+* **Creation:** The frontend generates a random Stacks private key and "funds" it via a one-time transaction from the user's main wallet.
+* **Threshold Encryption:** The agent's private key is XOR-encrypted using the user's Principal as a seed and stored in the DB, ensuring it can only be used during an active session.
+* **STX Drip:** A master wallet "drips" 0.5 STX to burner addresses to cover gas fees for the agent's autonomous transactions.
+
+### 3. SIP-018 Structured Mandates
+Safety is paramount. Users do not sign blind hex strings. Instead, they authorize a `CartMandate` using **SIP-018 Structured Data Signing**. This allows the Leather/Xverse wallet to display a human-readable summary of merchants, amounts, and items before the agent is granted execution power.
+
+### 4. UCP (Universal Commerce Protocol)
+The UCP "network" is integrated directly into our Prisma/PostgreSQL stack. Each product row functions as a UCP listing, where the `Vendor.pubkey` serves as the on-chain destination for x402 payments.
+
+---
+
+## 🛠️ Smart Contracts (Clarity)
+The project includes a dedicated Clarity suite for the **USDCx Bridge**:
+* **`usdcx-v1.clar`:** Manages deposit intent parsing (Keccak256), signature verification (Secp256k1), and protocol-controlled minting/burning.
+* **Governance:** Includes administrative functions to manage circle-attestors and withdrawal limits.
+
+---
+
+## ⚙️ Setup & Installation
+
+### Prerequisites
+* [Node.js](https://nodejs.org/) (v18+)
+* [Python](https://www.python.org/) (v3.12+)
+* [Clarinet](https://github.com/hirosystems/clarinet) (for contract testing)
+
+### 1. Environment Variables (`.env`)
+Configure `server/.env` with your Stacks credentials:
+```env
+GEMINI_API_KEY="your_key"
+STACKS_AGENT_PRIVATE_KEY="your_agent_key"
+USDCX_CONTRACT_ADDRESS="ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4"
 ```
 
-**If you prefer to start the services manually:**
-
-* **Frontend:** `cd frontend && npm install && npm run dev` (Runs on `localhost:3000`)
-* **Agent Backend:** `cd server && pip install -r requirements.txt && uvicorn server_entry:app --reload --port 8000`
-* **Merchant Server:** `cd server && python payment_server.py` (Runs on `localhost:8001`)
+### 2. Launch the Ecosystem
+From the root directory:
+```bash
+chmod +x start_all.sh
+./start_all.sh
+```
+This launches the **Next.js Frontend**, **FastAPI Agent Server**, and the **Simulated Merchant Server** simultaneously.
 
 ---
 
 ## 🧪 Testing the Flow (Demo Guide)
-
-
-To see the full potential of Cart-Blanche, use the following prompt in the chat interface once the app is running:
-
-> *"I'm looking for high-end noise-canceling headphones for my upcoming travel. My budget is $200. Please find the best options, verify their availability, and prepare a mandate for the one with the best reviews."*
-
-**What to watch for:**
-
-1. The **Shopping Agent** will query the Universal Commerce Protocol (UCP) decentralized index and propose real product options from UCP merchants.
-2. The **Vault Agent** will encrypt your $200 budget limit using STACKS BITE v2.
-3. The **Merchant Agent** will return a JSON `CartMandate`.
-4. You will be prompted by **MetaMask** to provide an EIP-712 signature.
-5. Watch your terminal! The `X402SettlementTool` will autonomously catch the `402` error and settle the transaction on the STACKS testnet.
-6. Check the **Agentic Audit Ledger** in the UI to view your verified on-chain receipt.
+1.  **Fund your Wallet:** Visit `/wallet` to deposit USDCx and authorize the agent.
+2.  **Ask the Agent:** *"I need a professional podcast setup under $500. Find the items and prepare a mandate."*
+3.  **Sign:** Review the **SIP-018** mandate in your Stacks wallet and sign.
+4.  **Verify:** Watch the **Agentic Audit Ledger** as the `X402SettlementTool` confirms the on-chain receipt.
 
 ---
 
-## 🏆 Hackathon Tracks Addressed
-
-* **Best Agentic App (Overall):** Demonstrates a deterministic `discover -> decide -> pay -> outcome` workflow with strict spend caps and EIP-712 guardrails.
-* **Best Integration of AP2:** Clean separation of user intent, credential custody (Vault Agent), and execution (`CartMandate`).
-* **Agentic Tool Usage on x402:** Shows agents chaining tools and handling HTTP 402 challenges autonomously.
-* **Encrypted Agents (STACKS):** Implements BITE v2 to enable conditional, private workflow execution.
-
-```# cart-blanche-nova-ai
+## 🏆 Buidl Battle Submission
+* **Innovation:** First-of-its-kind integration of x402 settlement logic with Stacks burner wallets.
+* **Technical Depth:** Multi-agent orchestration, Clarity contract bridge, and SIP-018 signing.
+* **Stacks Alignment:** Deep usage of SIP-010 (USDCx), SIP-018, and Stacks-specific auth patterns.
