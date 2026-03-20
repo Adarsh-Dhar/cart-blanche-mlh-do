@@ -119,7 +119,16 @@ export default function CategoriesPage() {
       if (form.parentId) body.parentId = form.parentId
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed')
+      if (!res.ok) {
+        if (data.error && /unique/i.test(data.error)) {
+          setToast({ msg: 'Name and slug must be unique', type: 'error' })
+        } else if (data.error && /circular/i.test(data.error)) {
+          setToast({ msg: 'Circular hierarchy not allowed', type: 'error' })
+        } else {
+          setToast({ msg: data.error || 'Failed', type: 'error' })
+        }
+        return
+      }
       setToast({ msg: editingId ? 'Category updated' : 'Category created', type: 'success' })
       setShowForm(false); load()
     } catch (e: any) { setToast({ msg: e.message, type: 'error' }) }

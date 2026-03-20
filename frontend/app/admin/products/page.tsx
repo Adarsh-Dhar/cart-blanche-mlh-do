@@ -38,6 +38,10 @@ export default function ProductsPage() {
   const [filterVendor, setFilterVendor] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterAvail, setFilterAvail] = useState('')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
+  const [sortBy, setSortBy] = useState('createdAt')
+  const [sortOrder, setSortOrder] = useState('desc')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -53,11 +57,16 @@ export default function ProductsPage() {
     setLoading(true)
     try {
       const params = new URLSearchParams({
-        page: String(page), limit: '10',
+        page: String(page),
+        limit: '10',
         ...(search && { search }),
         ...(filterVendor && { vendorId: filterVendor }),
         ...(filterCategory && { categoryId: filterCategory }),
         ...(filterAvail && { availability: filterAvail }),
+        ...(minPrice && { minPrice }),
+        ...(maxPrice && { maxPrice }),
+        ...(sortBy && { sortBy }),
+        ...(sortOrder && { sortOrder }),
       })
       const res = await fetch(`${API}/api/products?${params}`)
       const data = await res.json()
@@ -69,7 +78,7 @@ export default function ProductsPage() {
   }, [page, search, filterVendor, filterCategory, filterAvail])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(1) }, [search, filterVendor, filterCategory, filterAvail])
+  useEffect(() => { setPage(1) }, [search, filterVendor, filterCategory, filterAvail, minPrice, maxPrice, sortBy, sortOrder])
 
   useEffect(() => {
     Promise.all([
@@ -99,6 +108,7 @@ export default function ProductsPage() {
     if (required.some(k => !(form as any)[k])) return setToast({ msg: 'Fill all required fields', type: 'error' })
     setSaving(true)
     try {
+      // Uniqueness checks for productID, sku, gtin
       const url = editingId ? `${API}/api/products/${editingId}` : `${API}/api/products`
       const method = editingId ? 'PUT' : 'POST'
       const body = {
@@ -111,7 +121,14 @@ export default function ProductsPage() {
       }
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed')
+      if (!res.ok) {
+        if (data.error && /unique/i.test(data.error)) {
+          setToast({ msg: 'ProductID, SKU, or GTIN must be unique', type: 'error' })
+        } else {
+          setToast({ msg: data.error || 'Failed', type: 'error' })
+        }
+        return
+      }
       setToast({ msg: editingId ? 'Product updated' : 'Product created', type: 'success' })
       setShowForm(false); load()
     } catch (e: any) { setToast({ msg: e.message, type: 'error' }) }
@@ -168,8 +185,31 @@ export default function ProductsPage() {
               {availabilityOptions.map(a => <option key={a} value={a}>{a.replace('_', ' ')}</option>)}
             </Select>
           </div>
+          <div>
+            <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Min Price</div>
+            <Input type="number" value={minPrice} onChange={setMinPrice} placeholder="Min price" />
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Max Price</div>
+            <Input type="number" value={maxPrice} onChange={setMaxPrice} placeholder="Max price" />
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sort By</div>
+            <Select value={sortBy} onChange={setSortBy}>
+              <option value="createdAt">Created</option>
+              <option value="price">Price</option>
+              <option value="stockQuantity">Stock</option>
+            </Select>
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sort Order</div>
+            <Select value={sortOrder} onChange={setSortOrder}>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </Select>
+          </div>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <Btn variant="ghost" size="sm" onClick={() => { setFilterVendor(''); setFilterCategory(''); setFilterAvail('') }}>Clear filters</Btn>
+            <Btn variant="ghost" size="sm" onClick={() => { setFilterVendor(''); setFilterCategory(''); setFilterAvail(''); setMinPrice(''); setMaxPrice(''); setSortBy('createdAt'); setSortOrder('desc'); }}>Clear filters</Btn>
           </div>
         </div>
       )}

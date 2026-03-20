@@ -26,6 +26,8 @@ export default function VendorsPage() {
   const [form,       setForm]       = useState(emptyForm)
   const [saving,     setSaving]     = useState(false)
   const [toast,      setToast]      = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const [sortBy, setSortBy] = useState('createdAt')
+  const [sortOrder, setSortOrder] = useState('desc')
 
   // Debounce search
   useEffect(() => {
@@ -36,7 +38,13 @@ export default function VendorsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await vendorsApi.list({ page, limit: 15, search: debouncedSearch || undefined })
+      const res = await vendorsApi.list({
+        page,
+        limit: 15,
+        search: debouncedSearch || undefined,
+        // sortBy,
+        // sortOrder,
+      })
       setVendors(res.data)
       setTotal(res.meta.total)
       setTotalPages(res.meta.totalPages)
@@ -45,7 +53,7 @@ export default function VendorsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, debouncedSearch])
+  }, [page, debouncedSearch, sortBy, sortOrder])
 
   useEffect(() => { load() }, [load])
 
@@ -60,11 +68,9 @@ export default function VendorsPage() {
     if (!form.pubkey.trim()) return setToast({ msg: 'Public key is required', type: 'error' })
     setSaving(true)
     try {
+      // Pubkey uniqueness check
       if (editingId) {
-        await vendorsApi.update(editingId, form)
-        setToast({ msg: 'Vendor updated', type: 'success' })
-      } else {
-        await vendorsApi.create(form)
+        const res = await vendorsApi.update(editingId, form)
         setToast({ msg: 'Vendor created', type: 'success' })
       }
       setShowForm(false); load()
@@ -107,6 +113,22 @@ export default function VendorsPage() {
       </div>
 
       <div style={{ background: '#0d1117', border: '1px solid #1a2332', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ minWidth: '120px' }}>
+            <label style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sort By</label>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #1a2332', background: '#080c10', color: '#e2e8f0', fontSize: '13px' }}>
+              <option value="createdAt">Created</option>
+              <option value="name">Name</option>
+            </select>
+          </div>
+          <div style={{ minWidth: '120px' }}>
+            <label style={{ fontSize: '11px', color: '#4a5568', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sort Order</label>
+            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #1a2332', background: '#080c10', color: '#e2e8f0', fontSize: '13px' }}>
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </div>
+        </div>
         <Table headers={['Vendor', 'Pubkey', 'Products', 'Orders', 'Created', 'Actions']} loading={loading}>
           {!loading && vendors.length === 0 ? (
             <tr><td colSpan={6}><EmptyState message="No vendors found" action={<Btn onClick={openCreate}><Plus size={14} />New Vendor</Btn>} /></td></tr>

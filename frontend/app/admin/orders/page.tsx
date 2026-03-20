@@ -58,14 +58,24 @@ export default function OrdersPage() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const [showFilters, setShowFilters] = useState(false)
   const [walletFilter, setWalletFilter] = useState('')
+  const [txHashFilter, setTxHashFilter] = useState('')
+  const [vendorIdFilter, setVendorIdFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({
-        page: String(page), limit: '15',
+        page: String(page),
+        limit: '15',
         ...(filterStatus && { status: filterStatus }),
         ...(walletFilter && { userWallet: walletFilter }),
+        ...(txHashFilter && { txHash: txHashFilter }),
+        ...(vendorIdFilter && { vendorId: vendorIdFilter }),
+        ...(dateFrom && { dateFrom }),
+        ...(dateTo && { dateTo }),
+        ...(search && { search }),
       })
       const res = await fetch(`${API}/api/orders?${params}`)
       const data = await res.json()
@@ -74,15 +84,20 @@ export default function OrdersPage() {
       setTotal(data.meta?.total || 0)
     } catch { setToast({ msg: 'Failed to load orders', type: 'error' }) }
     finally { setLoading(false) }
-  }, [page, filterStatus, walletFilter])
+  }, [page, filterStatus, walletFilter, txHashFilter, vendorIdFilter, dateFrom, dateTo, search])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(1) }, [filterStatus, walletFilter, search])
+  useEffect(() => { setPage(1) }, [filterStatus, walletFilter, txHashFilter, vendorIdFilter, dateFrom, dateTo, search])
 
   const handleStatusUpdate = async () => {
     if (!statusChangeId || !newStatus) return
     setSaving(true)
     try {
+      // Strict status transition validation
+      const order = orders.find(o => o.id === statusChangeId)
+      if (!order || !STATUS_TRANSITIONS[order.status]?.includes(newStatus)) {
+        throw new Error('Invalid status transition')
+      }
       const res = await fetch(`${API}/api/orders/${statusChangeId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
@@ -155,7 +170,7 @@ export default function OrdersPage() {
           <SearchBar value={search} onChange={setSearch} placeholder="Search order ID, wallet, tx hash…" />
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={() => setShowFilters(!showFilters)} style={{ padding: '8px 14px', background: walletFilter ? '#f59e0b20' : 'transparent', border: `1px solid ${walletFilter ? '#f59e0b60' : '#1a2332'}`, borderRadius: '8px', color: walletFilter ? '#f59e0b' : '#64748b', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button onClick={() => setShowFilters(!showFilters)} style={{ padding: '8px 14px', background: walletFilter || txHashFilter || vendorIdFilter || dateFrom || dateTo ? '#f59e0b20' : 'transparent', border: `1px solid ${(walletFilter || txHashFilter || vendorIdFilter || dateFrom || dateTo) ? '#f59e0b60' : '#1a2332'}`, borderRadius: '8px', color: (walletFilter || txHashFilter || vendorIdFilter || dateFrom || dateTo) ? '#f59e0b' : '#64748b', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Filter size={13} />Advanced
           </button>
           <button onClick={load} style={{ padding: '8px 10px', background: 'transparent', border: '1px solid #1a2332', borderRadius: '8px', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
@@ -169,8 +184,20 @@ export default function OrdersPage() {
           <Field label="Wallet Address">
             <input value={walletFilter} onChange={e => setWalletFilter(e.target.value)} placeholder="0x..." style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }} />
           </Field>
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <Btn variant="ghost" size="sm" onClick={() => setWalletFilter('')}>Clear</Btn>
+          <Field label="Tx Hash">
+            <input value={txHashFilter} onChange={e => setTxHashFilter(e.target.value)} placeholder="Transaction hash" style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }} />
+          </Field>
+          <Field label="Vendor ID">
+            <input value={vendorIdFilter} onChange={e => setVendorIdFilter(e.target.value)} placeholder="Vendor ID" style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }} />
+          </Field>
+          <Field label="Date From">
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }} />
+          </Field>
+          <Field label="Date To">
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: '8px', color: '#e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'inherit' }} />
+          </Field>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+            <Btn variant="ghost" size="sm" onClick={() => { setWalletFilter(''); setTxHashFilter(''); setVendorIdFilter(''); setDateFrom(''); setDateTo(''); }}>Clear</Btn>
           </div>
         </div>
       )}

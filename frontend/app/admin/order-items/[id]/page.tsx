@@ -63,7 +63,17 @@ export default function OrderItemDetailPage() {
       try {
         const res = await fetch(`${API}/api/order-items/${id}`)
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Not found')
+        if (!res.ok) {
+          if (data.error && /stock/i.test(data.error)) {
+            setToast({ msg: 'Insufficient stock for this item', type: 'error' })
+          } else if (data.error && /pending/i.test(data.error)) {
+            setToast({ msg: 'Only PENDING orders can be modified', type: 'error' })
+          } else {
+            setToast({ msg: data.error || 'Not found', type: 'error' })
+          }
+          setLoading(false)
+          return
+        }
         setItem(data.data || data)
       } catch (e: any) {
         setToast({ msg: e.message, type: 'error' })

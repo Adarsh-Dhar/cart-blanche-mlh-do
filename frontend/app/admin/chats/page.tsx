@@ -34,11 +34,17 @@ export default function ChatsAdminPage() {
   const [total, setTotal]       = useState(0)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [toast, setToast]       = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const [search, setSearch]     = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res  = await fetch(`${API}/api/chats?page=${page}&limit=20`)
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '20',
+        ...(search && { search }),
+      })
+      const res  = await fetch(`${API}/api/chats?${params}`)
       const data = await res.json()
       setChats(data.data || [])
       setTotalPages(data.meta?.totalPages || 1)
@@ -48,9 +54,10 @@ export default function ChatsAdminPage() {
     } finally {
       setLoading(false)
     }
-  }, [page])
+  }, [page, search])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { setPage(1) }, [search])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this chat and all its messages?')) return
@@ -82,7 +89,16 @@ export default function ChatsAdminPage() {
           </Btn>
         }
       />
-
+      <div style={{ marginBottom: 16, position: 'relative', maxWidth: 360 }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search chat ID, first message…"
+          style={{ width: '100%', padding: '9px 12px', background: '#080c10', border: '1px solid #1a2332', borderRadius: 8, color: '#e2e8f0', fontSize: 13, outline: 'none', fontFamily: 'inherit' }}
+          onFocus={e => (e.target.style.borderColor = '#00ff9d66')}
+          onBlur={e  => (e.target.style.borderColor = '#1a2332')}
+        />
+      </div>
       <div style={{ background: '#0d1117', border: '1px solid #1a2332', borderRadius: '12px', overflow: 'hidden' }}>
         <Table
           headers={['Chat ID', 'First Message', 'Turns', 'Started', 'Last Updated', 'Actions']}
@@ -158,7 +174,6 @@ export default function ChatsAdminPage() {
           <Pagination page={page} totalPages={totalPages} onPage={setPage} />
         </div>
       </div>
-
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
