@@ -1,9 +1,12 @@
-"""
-tool/x402_settlement.py — Stacks Blockchain Settlement (SIP-010)
-=================================================================
-"""
+import httpx
+
+
 
 from __future__ import annotations
+
+import asyncio
+from __future__ import annotations
+import httpx
 
 import asyncio
 import hashlib
@@ -18,12 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from ..db import get_db
-
-logger = logging.getLogger(__name__)
-
-# ── Stacks network config ──────────────────────────────────────────────────────
-STACKS_NETWORK = os.environ.get("STACKS_NETWORK", "testnet")  # "testnet" | "mainnet"
-IS_TESTNET = STACKS_NETWORK == "testnet"
 
 # ── SIP-010 contract addresses (must match lib/stacks-config.ts) ───────────────
 USDCX_CONTRACT_ADDRESS = os.environ.get("USDCX_CONTRACT_ADDRESS") or "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4"
@@ -235,6 +232,16 @@ class X402SettlementTool:
         "using the official @stacks/transactions Node.js SDK."
     )
 
+
+    async def _get_next_nonce(self, address: str) -> int:
+        """Fetch the next available nonce from the Stacks API."""
+        base_url = "https://api.testnet.hiro.so" if IS_TESTNET else "https://api.mainnet.hiro.so"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base_url}/v2/accounts/{address}")
+            resp.raise_for_status()
+            data = resp.json()
+            return int(data["nonce"])
+
     async def run_async(
         self, *, args: dict[str, Any], tool_context: Any
     ) -> dict[str, Any]:
@@ -338,8 +345,11 @@ class X402SettlementTool:
         total_usd: Decimal = Decimal("0")
         loop = asyncio.get_event_loop()
 
-        for i, vendor in enumerate(merchants):
 
+        # ── Manual nonce management ─────────────────────────────────────────
+        current_nonce = await self._get_next_nonce(burner_address)
+
+        for i, vendor in enumerate(merchants):
             vendor_principal = (vendor.get("merchant_address", "") or "").strip().replace('"', '').replace("'", "")
             raw_val = float(vendor.get("amount", 0))
             usd_amt = raw_val if raw_val < 10_000 else raw_val / 1_000_000
@@ -350,10 +360,6 @@ class X402SettlementTool:
                 i + 1, len(merchants), vendor.get("name"), usd_amt, amount_atomic, funding_asset,
             )
 
-            # ── FIX: Strict Stacks address validation ─────────────────────────
-            # Valid Stacks addresses are EXACTLY 41 characters.
-            # Do NOT substitute a fallback address — fail clearly so the operator
-            # knows to fix the vendor's pubkey in the admin panel.
             if not _validate_stacks_address(vendor_principal):
                 error_msg = (
                     f"Invalid Stacks address for vendor '{vendor.get('name')}': "
@@ -369,7 +375,6 @@ class X402SettlementTool:
                 })
                 continue
 
-            # Diagnostic log
             logger.info(
                 "[X402] Sending to Node.js — vendor: %s, address: '%s', len: %d",
                 vendor.get("name"), vendor_principal, len(vendor_principal)
@@ -387,13 +392,14 @@ class X402SettlementTool:
             try:
                 result = await loop.run_in_executor(
                     None,
-                    _call_node_transfer,
+                    self._call_node_transfer_with_nonce,
                     burner_private_key,
                     vendor_principal,
                     amount_atomic,
                     contract_address,
                     contract_name,
                     burner_address,
+                    current_nonce
                 )
 
                 tx_id = result.get("txid", "unknown")
@@ -413,6 +419,8 @@ class X402SettlementTool:
                     "asset":            funding_asset,
                 })
 
+                current_nonce += 1
+
             except Exception as exc:
                 error_detail = str(exc)
                 logger.error("[X402] ✗ %s: %s", vendor.get("name"), error_detail)
@@ -421,6 +429,84 @@ class X402SettlementTool:
                     "amount_usd": usd_amt,
                     "error":      error_detail,
                 })
+
+    def _call_node_transfer_with_nonce(
+        self,
+        private_key: str,
+        recipient_address: str,
+        amount_atomic: int,
+        contract_address: str,
+        contract_name: str,
+        sender_address: str = "",
+        nonce: int = None,
+    ) -> dict:
+        """
+        Wrapper for _call_node_transfer to include nonce in payload.
+        """
+        node = _find_node()
+        if not _TRANSFER_SCRIPT.exists():
+            raise RuntimeError(
+                f"Stacks transfer script not found at {_TRANSFER_SCRIPT}. "
+                "Copy stacks_transfer.mjs to server/tool/ and run 'npm install' there."
+            )
+        node_modules = _TRANSFER_SCRIPT.parent / "node_modules"
+        if not node_modules.exists():
+            raise RuntimeError(
+                f"Node.js dependencies not installed. Run: cd {_TRANSFER_SCRIPT.parent} && npm install"
+            )
+        payload_dict = {
+            "type":              "sip010",
+            "private_key":       private_key,
+            "sender_address":    sender_address,
+            "recipient":         recipient_address,
+            "amount":            amount_atomic,
+            "contract_address":  contract_address,
+            "contract_name":     contract_name,
+            "network":           STACKS_NETWORK,
+        }
+        if nonce is not None:
+            payload_dict["nonce"] = nonce
+        payload = json.dumps(payload_dict)
+        logger.debug(
+            "[X402] node %s — recipient=%s amount=%d contract=%s.%s nonce=%s",
+            _TRANSFER_SCRIPT.name, recipient_address[:16], amount_atomic,
+            contract_address[:16], contract_name, nonce,
+        )
+        try:
+            proc = subprocess.run(
+                [node, str(_TRANSFER_SCRIPT), payload],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(_TRANSFER_SCRIPT.parent),
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Stacks transaction timed out after 60 seconds")
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Could not execute Node.js: {exc}") from exc
+        stdout = proc.stdout.strip()
+        stderr = proc.stderr.strip()
+        if proc.returncode != 0:
+            err_msg = stderr or stdout or f"node exited with code {proc.returncode}"
+            try:
+                err_data = json.loads(stderr or stdout)
+                reason = err_data.get("reason") or err_data.get("reason_data", {})
+                err_msg = f"{err_data.get('error', 'Unknown error')}"
+                if reason:
+                    err_msg += f" ({reason})"
+            except (json.JSONDecodeError, AttributeError):
+                pass
+            raise RuntimeError(f"Stacks transfer failed: {err_msg}")
+        if not stdout:
+            raise RuntimeError(f"No output from Stacks transfer script. stderr: {stderr}")
+        try:
+            output_str = stdout.split("\n")[-1]
+            result = json.loads(output_str)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid JSON from transfer script: {stdout[:200]}") from exc
+        if not result.get("success"):
+            raise RuntimeError(f"Transfer script returned failure: {result}")
+        return result
 
         if not receipts and failures:
             all_errors = "; ".join(f["error"] for f in failures)

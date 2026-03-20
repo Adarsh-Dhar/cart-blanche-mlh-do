@@ -59,7 +59,6 @@ async function main() {
           `Update the vendor's pubkey in /admin/vendors.`
         );
       }
-
       transaction = await makeSTXTokenTransfer({
         recipient,
         amount,
@@ -67,9 +66,8 @@ async function main() {
         network,
         memo: memo || "",
         anchorMode: AnchorMode.Any,
-        ...(nonce !== undefined ? { nonce: BigInt(nonce) } : {}),
+        nonce: nonce !== undefined ? BigInt(nonce) : undefined,
       });
-
     } else if (type === "sip010") {
       // Pre-flight validate recipient before calling standardPrincipalCV,
       // which throws an obscure "invalid length" error on bad addresses.
@@ -80,17 +78,14 @@ async function main() {
           `Update the vendor's pubkey in /admin/vendors to a valid Stacks address.`
         );
       }
-
       const senderAddress = ((data.sender_address || "").trim()) ||
         getAddressFromPrivateKey(private_key, TransactionVersion.Testnet);
-
       if (!isValidStacksAddress(senderAddress)) {
         throw new Error(
           `Invalid Stacks sender address: "${senderAddress}" ` +
           `(length=${senderAddress.length}, expected 41).`
         );
       }
-
       transaction = await makeContractCall({
         contractAddress: contract_address,
         contractName:    contract_name,
@@ -105,9 +100,8 @@ async function main() {
         network,
         anchorMode:        AnchorMode.Any,
         postConditionMode: PostConditionMode.Allow,
-        ...(nonce !== undefined ? { nonce: BigInt(nonce) } : {}),
+        nonce: nonce !== undefined ? BigInt(nonce) : undefined,
       });
-
     } else {
       throw new Error(`Invalid transaction type: "${type}". Expected "stx" or "sip010".`);
     }
