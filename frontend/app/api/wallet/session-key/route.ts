@@ -1,21 +1,10 @@
-/**
- * app/api/wallet/session-key/route.ts
- * ──────────────────────────────────────────────────────────────────────────────
- * POST /api/wallet/session-key
- *   Saves / upserts a SmartWallet record (burner wallet + encrypted session key).
- *
- * GET /api/wallet/session-key
- *   Returns the active SmartWallet record for the current ownerEoa (if any).
- */
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-
-// ── POST — save / upsert a new session key registration ───────────────────────
+// POST /api/wallet/session-key  – create or update a SmartWallet record
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-
     const {
       smartWalletAddress,
       sessionKeyPublic,
@@ -25,44 +14,34 @@ export async function POST(request: NextRequest) {
       ownerEoa,
       chatId,
       fundingAsset,
-    } = body as {
-      smartWalletAddress:         string;
-      sessionKeyPublic:           string;
-      sessionKeyEncryptedPrivate: string;
-      spendLimitUsdc:             number;
-      expiresAt:                  string;   // ISO string
-      ownerEoa:                   string;
-      chatId?:                    string;
-      fundingAsset?:              string;
-    };
+    } = body;
 
-    if (
-      !smartWalletAddress ||
-      !sessionKeyPublic   ||
-      !sessionKeyEncryptedPrivate ||
-      !spendLimitUsdc     ||
-      !expiresAt          ||
-      !ownerEoa
-    ) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
-
-    const ownerEoaLower = ownerEoa.toLowerCase();
-    const expiresAtDate = new Date(expiresAt);
-
-    // Build data payload — only include optional fields when present
-    const data: Record<string, unknown> = {
+    const required = {
       smartWalletAddress,
       sessionKeyPublic,
       sessionKeyEncryptedPrivate,
       spendLimitUsdc,
-      expiresAt:   expiresAtDate,
-      ownerEoa:    ownerEoaLower,
+      expiresAt,
+      ownerEoa,
     };
-    if (chatId)       data.chatId       = chatId;
-    if (fundingAsset) data.fundingAsset = fundingAsset;
+    const missing = Object.entries(required)
+      .filter(([, v]) => v === undefined || v === null || v === '')
+      .map(([k]) => k);
 
-    // Prisma upsert: update if ownerEoa already exists, create otherwise
+    if (missing.length) {
+      return NextResponse.json(
+        { error: `Missing required fields: ${missing.join(', ')}` },
+        { status: 400 },
+      );
+    }
+
+    const expiresAtDate = new Date(expiresAt);
+    if (isNaN(expiresAtDate.getTime())) {
+      return NextResponse.json({ error: 'expiresAt must be a valid ISO date string' }, { status: 400 });
+    }
+
+    const ownerEoaLower = ownerEoa.toLowerCase();
+
     const wallet = await (prisma as any).smartWallet.upsert({
       where:  { ownerEoa: ownerEoaLower },
       update: {
@@ -75,7 +54,7 @@ export async function POST(request: NextRequest) {
         ...(fundingAsset && { fundingAsset }),
       },
       create: {
-        ownerEoa:    ownerEoaLower,
+        ownerEoa: ownerEoaLower,
         smartWalletAddress,
         sessionKeyPublic,
         sessionKeyEncryptedPrivate,
@@ -86,24 +65,22 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Never return the encrypted private key to the frontend
+    // Never return the encrypted private key
     const { sessionKeyEncryptedPrivate: _stripped, ...safe } = wallet;
     return NextResponse.json({ data: safe }, { status: 201 });
-
   } catch (error) {
-    console.error("[POST /api/wallet/session-key]", error);
-    return NextResponse.json({ error: "Failed to save session key" }, { status: 500 });
+    console.error('[POST /api/wallet/session-key]', error);
+    return NextResponse.json({ error: 'Failed to save session key' }, { status: 500 });
   }
 }
 
-// ── GET — fetch the active session key for a given ownerEoa ───────────────────
+// GET /api/wallet/session-key  – fetch active session for ownerEoa / chatId
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const ownerEoa = searchParams.get("ownerEoa");
-    const chatId   = searchParams.get("chatId");
+    const ownerEoa = searchParams.get('ownerEoa');
+    const chatId   = searchParams.get('chatId');
 
-    // Build where clause: always filter out expired sessions
     const where: Record<string, unknown> = {
       expiresAt: { gt: new Date() },
     };
@@ -112,19 +89,15 @@ export async function GET(request: NextRequest) {
 
     const wallet = await (prisma as any).smartWallet.findFirst({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (!wallet) {
-      return NextResponse.json({ data: null }, { status: 200 });
-    }
+    if (!wallet) return NextResponse.json({ data: null }, { status: 200 });
 
-    // Never return the encrypted private key to the frontend
     const { sessionKeyEncryptedPrivate: _stripped, ...safe } = wallet;
     return NextResponse.json({ data: safe });
-
   } catch (error) {
-    console.error("[GET /api/wallet/session-key]", error);
-    return NextResponse.json({ error: "Failed to fetch session key" }, { status: 500 });
+    console.error('[GET /api/wallet/session-key]', error);
+    return NextResponse.json({ error: 'Failed to fetch session key' }, { status: 500 });
   }
 }

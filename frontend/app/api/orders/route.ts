@@ -1,23 +1,39 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { OrderStatus, Prisma } from "@/lib/generated/prisma/client";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { OrderStatus, Prisma } from '@/lib/generated/prisma/client';
 
-// GET /api/orders - List all orders
+// GET /api/orders
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get("page") ?? "1");
-    const limit = parseInt(searchParams.get("limit") ?? "20");
-    const skip = (page - 1) * limit;
+    const page       = Math.max(1, parseInt(searchParams.get('page')  ?? '1'));
+    const limit      = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '20')));
+    const skip       = (page - 1) * limit;
+    const status     = searchParams.get('status')     as OrderStatus | null;
+    const userWallet = searchParams.get('userWallet') || undefined;
+    const txHash     = searchParams.get('txHash')     || undefined;
+    const vendorId   = searchParams.get('vendorId')   || undefined;
+    const dateFrom   = searchParams.get('dateFrom')   || undefined;
+    const dateTo     = searchParams.get('dateTo')     || undefined;
 
-    const status = searchParams.get("status") as OrderStatus | null;
-    const userWallet = searchParams.get("userWallet");
-    const txHash = searchParams.get("txHash");
+    const validStatuses = ['PENDING', 'PROCESSING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    if (status && !validStatuses.includes(status)) {
+      return NextResponse.json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` }, { status: 400 });
+    }
 
     const where: Prisma.OrderWhereInput = {
-      ...(status && { status }),
-      ...(userWallet && { userWallet: { equals: userWallet, mode: "insensitive" } }),
-      ...(txHash && { txHash }),
+      ...(status     && { status }),
+      ...(userWallet && { userWallet: { equals: userWallet, mode: 'insensitive' } }),
+      ...(txHash     && { txHash }),
+      ...(vendorId   && { items: { some: { vendorId } } }),
+      ...(dateFrom || dateTo
+        ? {
+            createdAt: {
+              ...(dateFrom && { gte: new Date(dateFrom) }),
+              ...(dateTo   && { lte: new Date(dateTo)   }),
+            },
+          }
+        : {}),
     };
 
     const [orders, total] = await prisma.$transaction([
@@ -29,11 +45,11 @@ export async function GET(request: NextRequest) {
           items: {
             include: {
               product: { select: { id: true, name: true, images: true, sku: true } },
-              vendor: { select: { id: true, name: true } },
+              vendor:  { select: { id: true, name: true, logoUrl: true } },
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
       }),
       prisma.order.count({ where }),
     ]);
@@ -43,84 +59,73 @@ export async function GET(request: NextRequest) {
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    console.error("[GET /api/orders]", error);
-    return NextResponse.json({
-      error: "Failed to fetch orders",
-      message: error instanceof Error ? error.message : String(error),
-      stack: process.env.NODE_ENV === "development" && error instanceof Error ? error.stack : undefined,
-    }, { status: 500 });
+    console.error('[GET /api/orders]', error);
+    return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
   }
 }
 
-// POST /api/orders - Create a new order
-// Body: { userWallet?, txHash?, items: [{ productId, quantity }] }
+// POST /api/orders
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { userWallet, txHash, items } = body;
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { error: "Order must contain at least one item" },
-        { status: 400 }
-      );
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ error: 'Order must contain at least one item' }, { status: 400 });
     }
 
     for (const item of items) {
-      if (!item.productId || typeof item.quantity !== "number" || item.quantity < 1) {
-        return NextResponse.json(
-          { error: "Each item must have a valid productId and quantity >= 1" },
-          { status: 400 }
-        );
+      if (!item.productId) {
+        return NextResponse.json({ error: 'Each item must have a productId' }, { status: 400 });
+      }
+      if (typeof item.quantity !== 'number' || item.quantity < 1) {
+        return NextResponse.json({ error: 'Each item must have quantity >= 1' }, { status: 400 });
       }
     }
 
-    const productIds: string[] = items.map((i: { productId: string }) => i.productId);
-    const products = await prisma.product.findMany({
-      where: { id: { in: productIds } },
-    });
+    const productIds = [...new Set<string>(items.map((i: { productId: string }) => i.productId))];
+    const products   = await prisma.product.findMany({ where: { id: { in: productIds } } });
 
     if (products.length !== productIds.length) {
-      const foundIds = new Set(products.map((p: { id: any; }) => p.id));
-      const missing = productIds.filter((id) => !foundIds.has(id));
-      return NextResponse.json(
-        { error: `Products not found: ${missing.join(", ")}` },
-        { status: 404 }
-      );
+      const found   = new Set(products.map((p) => p.id));
+      const missing = productIds.filter((id) => !found.has(id));
+      return NextResponse.json({ error: `Products not found: ${missing.join(', ')}` }, { status: 404 });
     }
 
-    const productMap = new Map(products.map((p: { id: any; }) => [p.id, p]));
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
     for (const item of items) {
       const product = productMap.get(item.productId)!;
-      if (product < item.quantity) {
+      if (product.stockQuantity < item.quantity) {
         return NextResponse.json(
-          { error: `Insufficient stock for product "${product.name}". Available: ${product.stockQuantity}` },
-          { status: 409 }
+          { error: `Insufficient stock for "${product.name}". Available: ${product.stockQuantity}` },
+          { status: 409 },
         );
       }
+    }
+
+    // Aggregate quantities if same product appears multiple times
+    const quantityMap = new Map<string, number>();
+    for (const item of items) {
+      quantityMap.set(item.productId, (quantityMap.get(item.productId) ?? 0) + item.quantity);
     }
 
     let totalAmount = new Prisma.Decimal(0);
-    for (const item of items) {
-      const product = productMap.get(item.productId)!;
-      totalAmount = totalAmount.add(product.price.mul(item.quantity));
+    for (const [productId, qty] of quantityMap) {
+      const p = productMap.get(productId)!;
+      totalAmount = totalAmount.add(p.price.mul(qty));
     }
 
-    const order = await prisma.$transaction(async (tx: { order: { create: (arg0: { data: any; include: { items: { include: { product: { select: { id: boolean; name: boolean; sku: boolean; }; }; vendor: { select: { id: boolean; name: boolean; }; }; }; }; }; }) => any; }; product: { update: (arg0: { where: { id: any; }; data: { stockQuantity: { decrement: any; }; }; }) => any; }; }) => {
+    const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
           totalAmount,
           ...(userWallet && { userWallet }),
-          ...(txHash && { txHash }),
+          ...(txHash     && { txHash }),
           items: {
-            create: items.map((item: { productId: string; quantity: number }) => {
-              const product = productMap.get(item.productId)!;
-              return {
-                quantity: item.quantity,
-                price: product.price,
-                productId: item.productId,
-                vendorId: product.vendorId,
-              };
+            create: [...quantityMap.entries()].map(([productId, qty]) => {
+              const p = productMap.get(productId)!;
+              return { quantity: qty, price: p.price, productId, vendorId: p.vendorId };
             }),
           },
         },
@@ -128,16 +133,16 @@ export async function POST(request: NextRequest) {
           items: {
             include: {
               product: { select: { id: true, name: true, sku: true } },
-              vendor: { select: { id: true, name: true } },
+              vendor:  { select: { id: true, name: true } },
             },
           },
         },
       });
 
-      for (const item of items) {
+      for (const [productId, qty] of quantityMap) {
         await tx.product.update({
-          where: { id: item.productId },
-          data: { stockQuantity: { decrement: item.quantity } },
+          where: { id: productId },
+          data:  { stockQuantity: { decrement: qty } },
         });
       }
 
@@ -146,11 +151,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ data: order }, { status: 201 });
   } catch (error) {
-    console.error("[POST /api/orders]", error);
-    return NextResponse.json({
-      error: "Failed to create order",
-      message: error instanceof Error ? error.message : String(error),
-      stack: process.env.NODE_ENV === "development" && error instanceof Error ? error.stack : undefined,
-    }, { status: 500 });
+    console.error('[POST /api/orders]', error);
+    return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }
