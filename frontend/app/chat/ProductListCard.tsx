@@ -88,6 +88,10 @@ export function ProductListCard({ data, onConfirm }: ProductListCardProps) {
   const pct = budget > 0 ? Math.min((total / budget) * 100, 100) : 0;
   const [confirmed, setConfirmed] = useState(false);
 
+  React.useEffect(() => {
+    console.log("ProductListCard mounted. Products:", products);
+  }, []);
+
   const handleConfirm = () => {
     setConfirmed(true);
     onConfirm();

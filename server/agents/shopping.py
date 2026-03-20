@@ -9,12 +9,10 @@ import json
 import logging
 from langchain_core.messages import AIMessage
 from server.state import AgentState, MAX_STEPS
-from server.tool.ucp_search import UCPCommerceSearchTool
 from server.db import get_db
 from .catalog  import build_alias_map, get_raw_products
 
 logger = logging.getLogger(__name__)
-_ucp_tool = UCPCommerceSearchTool()
 
 # ── Permanent safety-net aliases ──────────────────────────────────────────────
 _HARDCODED_ALIASES: dict[str, list[str]] = {
@@ -48,17 +46,6 @@ async def _get_merged_aliases() -> dict[str, list[str]]:
             merged[key] = variants
     return merged
 
-def _relevance_score(product: dict, term: str, alias_variants: list[str]) -> int:
-    combined = (product.get("name", "") + " " + product.get("description", "")).lower()
-    score    = 0
-    for word in term.lower().split():
-        if len(word) > 3 and word in combined:
-            score += 1
-    for variant in alias_variants[:4]:
-        if variant.lower() in combined:
-            score += 1
-    return min(score, 5)
-
 def _find_aliases(term: str, alias_map: dict[str, list[str]]) -> list[str]:
     term_lower = term.strip().lower()
     if term_lower in alias_map:
@@ -72,26 +59,53 @@ def _find_aliases(term: str, alias_map: dict[str, list[str]]) -> list[str]:
     return [term, stemmed] if stemmed != term_lower else [term]
 
 async def _search_term(term: str, alias_map: dict[str, list[str]]) -> list[dict]:
-    """Fan out DB searches across alias variants; score and rank results."""
+    """Directly searches the cached catalog bypassing complex Prisma OR filters."""
+    products = await get_raw_products()
     variants = _find_aliases(term, alias_map)
-    seen:    set[str]  = set()
-    results: list[dict] = []
+    
+    results = []
+    seen_ids = set()
 
-    for variant in variants:
-        try:
-            hits = await _ucp_tool.run_async(args={"query": variant}, tool_context=None)
-            for r in hits:
-                if r["id"] not in seen:
-                    seen.add(r["id"])
-                    r["_relevance"] = _relevance_score(r, term, variants)
-                    results.append(r)
-        except Exception as exc:
-            logger.warning("[Shopping] Search failed '%s': %s", variant, exc)
-        if results:
-            break   
+    for p in products:
+        name_lower = p.get('name', '').lower()
+        desc_lower = p.get('description', '').lower()
+        
+        score = 0
+        for variant in variants:
+            v_lower = variant.lower()
+            if v_lower == name_lower:
+                score = max(score, 100)
+            elif v_lower in name_lower:
+                score = max(score, 50)
+            elif v_lower in desc_lower:
+                score = max(score, 10)
+                
+        if score > 0 and p.get("id") not in seen_ids:
+            seen_ids.add(p.get("id"))
+            
+            # Safely extract nested properties
+            vendor_name = p.get("vendor", {}).get("name", "Unknown") if isinstance(p.get("vendor"), dict) else "Unknown"
+            vendor_address = p.get("vendor", {}).get("pubkey", "") if isinstance(p.get("vendor"), dict) else ""
+            category_name = p.get("category", {}).get("name", "") if isinstance(p.get("category"), dict) else ""
+            
+            mapped_product = {
+                "id": p.get("id"),
+                "product_id": p.get("productID", ""),
+                "name": p.get("name", ""),
+                "description": p.get("description", ""),
+                "price": float(p.get("price", 0.0)),
+                "currency": "USD",
+                "vendor": vendor_name,
+                "merchant_address": vendor_address,
+                "category": category_name,
+                "stock": p.get("stockQuantity", 999),
+                "images": p.get("images", []),
+                "_relevance": score
+            }
+            results.append(mapped_product)
 
-    results.sort(key=lambda x: (-x.get("_relevance", 0), x["price"]))
-    return results
+    results.sort(key=lambda x: (-x.get('_relevance', 0), x.get('price', 0)))
+    return results[:5]
 
 async def _save_agent_response(state: AgentState, rtype: str, text: str) -> None:
     chat_id = state.get("chat_id")
@@ -107,35 +121,22 @@ async def shopping_node(state: AgentState) -> dict:
     steps = state.get("steps", 0)
 
     if steps >= MAX_STEPS:
-        return {
-            "product_list": [], "_shopped": True, "steps": steps + 1,
-            "messages": [AIMessage(content="Search limit reached.", name="ShoppingAgent")],
-        }
+        return {"product_list": [], "_shopped": True, "steps": steps + 1, "messages": [AIMessage(content="Search limit reached.", name="ShoppingAgent")]}
 
     plan             = state.get("project_plan", "")
     budget           = state.get("budget_usd", 0.0) or 0.0
     item_preferences = state.get("item_preferences") or {}
 
     if not plan:
-        return {
-            "product_list": [], "_shopped": True, "steps": steps + 1,
-            "messages": [AIMessage(content="No search plan found.", name="ShoppingAgent")],
-        }
+        return {"product_list": [], "_shopped": True, "steps": steps + 1, "messages": [AIMessage(content="No search plan found.", name="ShoppingAgent")]}
 
     print(f"Plan: {plan}  Budget: ${budget}  Prefs: {item_preferences}")
-
-    # ── Fetch merged alias map once per invocation ─────────────────────────────
     alias_map = await _get_merged_aliases()
 
-    # ── Phase 1: Search all terms (Tolerates missing categories) ───────────────
     term_slots: list[dict] = []
-    
-    # Process each term separated by a semicolon
     for raw_term in [c.strip() for c in plan.split(";") if c.strip()]:
         cat_name = "Catalog"
         term = raw_term
-        
-        # If orchestrator provided "Category: Item", split it gracefully
         if ":" in raw_term:
             parts = raw_term.split(":", 1)
             cat_name = parts[0].strip()
@@ -147,46 +148,18 @@ async def shopping_node(state: AgentState) -> dict:
         if options:
             best = options[0]
             print(f"    -> {len(options)} results | top: {best['name']} (${best['price']}) rel={best.get('_relevance',0)}")
-            term_slots.append({
-                "category": cat_name,
-                "term":     term,
-                "options":  options,
-            })
+            term_slots.append({"category": cat_name, "term": term, "options": options})
         else:
             print(f"    -> no results for '{term}'")
 
     if not term_slots:
-        # Dictionary-safe Fallback Loop
-        products = await get_raw_products()
-        plan_terms = [t.strip() for t in plan.split(';') if t.strip()]
-        matched = []
-        for p in products:
-            name_lower = p.get("name", "").lower()
-            desc_lower = p.get("description", "").lower()
-            for term in plan_terms:
-                term_l = term.lower().replace("category:", "").strip()
-                if term_l in name_lower or term_l in desc_lower:
-                    matched.append(p)
-                    break
-                    
-        if matched:
-            return {
-                "product_list": matched, "_shopped": True, "steps": steps + 1,
-                "messages": [AIMessage(
-                    content=f"Fallback: Found {len(matched)} similar products for your request.", name="ShoppingAgent",
-                )],
-            }
-        else:
-            return {
-                "product_list": [], "_shopped": True, "steps": steps + 1,
-                "messages": [AIMessage(
-                    content="No in-stock or similar products found for your request.", name="ShoppingAgent",
-                )],
-            }
+        return {
+            "product_list": [], "_shopped": True, "steps": steps + 1,
+            "messages": [AIMessage(content="I couldn't find matching items in the catalog.", name="ShoppingAgent")]
+        }
 
-    # ── Phase 2: initial selection — one item per term slot ───────────────────
-    selected:     list[dict] = []
-    selected_ids: set[str]   = set()
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
     remaining = budget
 
     for slot in term_slots:
@@ -213,13 +186,9 @@ async def shopping_node(state: AgentState) -> dict:
         selected_ids.add(chosen["id"])
         remaining = round(remaining - chosen["price"], 2)
 
-    # ── Phase 3: budget-fill loop ──────────────────────────────────────────────
     if budget > 0:
         def _all_candidates() -> list[dict]:
-            pool = [
-                {"slot": s, "product": p} for s in term_slots for p in s["options"]
-                if p["id"] not in selected_ids
-            ]
+            pool = [{"slot": s, "product": p} for s in term_slots for p in s["options"] if p["id"] not in selected_ids]
             pool.sort(key=lambda x: (-x["product"].get("_relevance", 0), -x["product"]["price"]))
             return pool
 
@@ -234,16 +203,8 @@ async def shopping_node(state: AgentState) -> dict:
                     improved  = True
                     break
 
-    # ── Build output ───────────────────────────────────────────────────────────
     final_products = [s["product"] for s in selected]
     total_spent    = round(sum(p["price"] for p in final_products), 2)
-
-    util = (
-        f"{len(final_products)} items | ${total_spent:.2f} / ${budget:.2f} "
-        f"({total_spent / budget * 100:.1f}% utilised)"
-        if budget > 0 else f"{len(final_products)} items | ${total_spent:.2f}"
-    )
-    print(f"\n[Shopping] Done — {util}")
 
     payload = {
         "type":             "product_list",

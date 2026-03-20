@@ -394,10 +394,23 @@ async def orchestrator_node(state: AgentState) -> dict:
     llm_suggestion  = ""
 
     try:
-        response = await llm.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=query),
-        ])
+        # Load conversation history from state
+        history = state.get("messages", [])
+        prompt_msgs = [SystemMessage(content=system_prompt)]
+        # Add the last 6 messages for context so it remembers the previous items!
+        for msg in history[-6:]:
+            if isinstance(msg, tuple):
+                role, content = msg
+                if role == "user":
+                    prompt_msgs.append(HumanMessage(content=content))
+                else:
+                    prompt_msgs.append(AIMessage(content=content))
+            elif isinstance(msg, HumanMessage) or isinstance(msg, AIMessage):
+                prompt_msgs.append(msg)
+        # Ensure the current query is the final message
+        if not prompt_msgs or prompt_msgs[-1].content != query:
+            prompt_msgs.append(HumanMessage(content=query))
+        response = await llm.ainvoke(prompt_msgs)
         raw_content: str = (
             response.content if isinstance(response.content, str) else str(response.content)
         )

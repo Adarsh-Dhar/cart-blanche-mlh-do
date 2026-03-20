@@ -171,20 +171,38 @@ async def run_sse(payload: Any = Body(None)):
                     "steps":            0,
                 }
 
-            # ── KEY FIX: pre-populate sent_message_ids with ALL messages already
-            # in the checkpoint BEFORE this request starts.
-            # stream_mode="values" re-emits the full state snapshot after each node,
-            # which means Turn-1 messages (e.g. the shopping product_list JSON) get
-            # re-broadcast on the Turn-2 "Looks good" stream and confuse the frontend.
-            # By starting with the existing message IDs already in the set, we only
-            # ever emit messages that were ADDED during this specific request.
-            sent_message_ids: set[int] = set()
+            # ── KEY FIX: pre-populate sent_message_ids using stable msg.id values.
+            #
+            # Root cause of the stale-cart bug:
+            #   stream_mode="values" re-emits the FULL accumulated message list
+            #   after every node. Without correct deduplication, Turn-1 messages
+            #   (e.g. the old product_list JSON) are re-broadcast on every
+            #   subsequent turn, reaching the frontend before the new messages.
+            #   The frontend's pickBestChunk picks the FIRST highest-priority
+            #   chunk it sees, so it always showed the Turn-1 product list until
+            #   a page refresh loaded the correct DB record.
+            #
+            # Why the old code using id(msg) was wrong:
+            #   Python's id() is the object's memory address. MemorySaver
+            #   deserialises the checkpoint into NEW Python objects each time,
+            #   so the id() values returned by get_state() are completely
+            #   different from the id() values on the objects produced by
+            #   astream(). The filter therefore never matched, and every
+            #   Turn-1 message slipped through on every subsequent turn.
+            #
+            # Fix: use msg.id — a stable UUID that langchain-core stores inside
+            #   the message object itself and persists through serialisation
+            #   round-trips. Both get_state() and astream() return the same
+            #   msg.id for the same logical message, so the filter works correctly.
+            sent_message_ids: set[str] = set()
             try:
                 snapshot = _graph.get_state(config)
                 if snapshot and snapshot.values:
                     for msg in snapshot.values.get("messages", []):
                         if isinstance(msg, AIMessage):
-                            sent_message_ids.add(id(msg))
+                            stable_id = getattr(msg, "id", None)
+                            if stable_id:
+                                sent_message_ids.add(stable_id)
                     logger.info(
                         "[run_sse] Pre-seeded %d existing message IDs from checkpoint",
                         len(sent_message_ids),
@@ -201,7 +219,11 @@ async def run_sse(payload: Any = Body(None)):
                     if not isinstance(msg, AIMessage):
                         continue
 
-                    msg_key = id(msg)
+                    # Use the stable UUID; fall back to object identity only for
+                    # very old langchain-core builds that predate the id field.
+                    stable_id = getattr(msg, "id", None)
+                    msg_key: str = stable_id if stable_id else str(id(msg))
+
                     if msg_key in sent_message_ids:
                         continue
                     sent_message_ids.add(msg_key)

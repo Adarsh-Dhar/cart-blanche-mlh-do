@@ -317,6 +317,7 @@ function ProductCard({ product, index }: { product: any; index: number }) {
   const [imgError, setImgError] = useState(false);
   const [visible, setVisible] = useState(false);
   useEffect(() => { const t = setTimeout(() => setVisible(true), index * 55); return () => clearTimeout(t); }, [index]);
+  console.log(product);
   const hasImg = product.images?.[0] && !imgError && !product.images[0].includes("placeholder");
 
   return (
