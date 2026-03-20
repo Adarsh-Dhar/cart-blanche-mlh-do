@@ -155,7 +155,7 @@ export function useBurnerWallet() {
         setStatus("generating");
         const rawPrivKey    = makeRandomPrivKey();
         const privKeyHex    = extractPrivKeyHex(rawPrivKey);
-        const burnerAddress = getAddressFromPrivateKey(privKeyHex, );
+        const burnerAddress = getAddressFromPrivateKey(privKeyHex, STACKS_TESTNET);
 
         if (!burnerAddress?.startsWith("S")) {
           throw new Error(`Generated invalid burner address: "${burnerAddress}"`);

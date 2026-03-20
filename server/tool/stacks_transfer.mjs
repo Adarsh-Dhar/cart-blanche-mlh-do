@@ -40,7 +40,7 @@ async function main() {
     if (!input) throw new Error("No JSON input provided");
     
     const data = JSON.parse(input);
-    const { type, private_key, amount, memo } = data;
+    const { type, private_key, amount, memo, nonce } = data;
     
     // Clean addresses — remove whitespace and stray quotes
     const recipient        = (data.recipient        || "").trim().replace(/['"]/g, "");
@@ -67,6 +67,7 @@ async function main() {
         network,
         memo: memo || "",
         anchorMode: AnchorMode.Any,
+        ...(nonce !== undefined ? { nonce: BigInt(nonce) } : {}),
       });
 
     } else if (type === "sip010") {
@@ -104,6 +105,7 @@ async function main() {
         network,
         anchorMode:        AnchorMode.Any,
         postConditionMode: PostConditionMode.Allow,
+        ...(nonce !== undefined ? { nonce: BigInt(nonce) } : {}),
       });
 
     } else {
