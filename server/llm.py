@@ -1,5 +1,5 @@
 """
-llm.py — Shared LLM instance (GitHub Models / GPT-4o-mini)
+llm.py — Shared LLM instance (GitHub Models / gpt-4o)
 ============================================================
 Import this anywhere you need the LLM:
 
@@ -21,7 +21,7 @@ import os
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    model=os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
+    model=os.environ.get("GITHUB_MODEL_NAME", "gpt-4o"),
     api_key=os.environ.get("GITHUB_TOKEN", ""),          # NOT openai_api_key
     base_url="https://models.inference.ai.azure.com",    # NOT openai_api_base
     temperature=0.0,   # maximum determinism for structured extraction
