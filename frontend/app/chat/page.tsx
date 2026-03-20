@@ -196,7 +196,7 @@ function MandateCard({ data }: { data: any }) {
           <div style={{ fontSize: 10, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.1em" }}>Total USDC</div>
           <div style={{ fontSize: 11, color: "#78350f", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fbbf24", display: "inline-block", animation: "cbPulse 1.5s infinite" }} />
-            Processing via SKALE network…
+            Processing via STACKS network…
           </div>
         </div>
         <div style={{ fontSize: 24, fontWeight: 800, color: "#fbbf24", fontFamily: "'Syne',sans-serif" }}>${total.toFixed(2)}</div>
@@ -238,7 +238,7 @@ function ReceiptCard({ data }: { data: any }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: headerColor }}>{headerLabel}</div>
           <div style={{ fontSize: 11, color: isFailed ? "#ef4444" : "#0e7490", marginTop: 2 }}>
-            {isFailed ? "Check your Smart Wallet setup at /wallet" : receipts.length > 0 ? `${receipts.length} transaction${receipts.length !== 1 ? "s" : ""} settled on SKALE` : "No transactions confirmed"}
+            {isFailed ? "Check your Smart Wallet setup at /wallet" : receipts.length > 0 ? `${receipts.length} transaction${receipts.length !== 1 ? "s" : ""} settled on STACKS` : "No transactions confirmed"}
           </div>
         </div>
         {total > 0 && (
@@ -820,7 +820,7 @@ export default function ChatPage() {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 7, fontSize: 10, color: "#1e293b", padding: "0 2px" }}>
               <span>Enter ↵ to send · Shift+Enter for new line</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><ShieldCheck size={10} />Smart Wallet · x402 · SKALE</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><ShieldCheck size={10} />Smart Wallet · x402 · STACKS</span>
             </div>
           </div>
         </div>

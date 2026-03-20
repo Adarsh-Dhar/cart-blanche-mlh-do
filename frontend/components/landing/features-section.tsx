@@ -32,7 +32,7 @@ const features = [
   {
     icon: Wallet,
     title: 'Multi-chain Support',
-    description: 'USDC on SKALE, Base, and other blockchain networks',
+    description: 'USDC on STACKS, Base, and other blockchain networks',
   },
 ]
 

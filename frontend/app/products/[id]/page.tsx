@@ -334,7 +334,7 @@ export default function ProductDetailPage() {
           </div>
 
           <p className="text-center text-xs text-muted-foreground/50">
-            Powered by Cart-Blanche · x402 crypto settlement on SKALE
+            Powered by Cart-Blanche · x402 crypto settlement on STACKS
           </p>
         </div>
       </div>

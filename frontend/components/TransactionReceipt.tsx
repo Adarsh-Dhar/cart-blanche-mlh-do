@@ -21,7 +21,7 @@ interface TransactionReceiptProps {
   };
 }
 
-const SKALE_EXPLORER_URL = 'https://explorer.hiro.so/txid//';
+const STACKS_EXPLORER_URL = 'https://explorer.hiro.so/txid//';
 
 export function TransactionReceipt({ receipt }: TransactionReceiptProps) {
   // Extract list: handle both batch array and single hashes
@@ -45,7 +45,7 @@ export function TransactionReceipt({ receipt }: TransactionReceiptProps) {
       </div>
 
       <div className="text-xs text-muted-foreground mb-4">
-        {receipt.details || `Successfully processed ${txs.length} payment${txs.length > 1 ? 's' : ''} on the SKALE network.`}
+        {receipt.details || `Successfully processed ${txs.length} payment${txs.length > 1 ? 's' : ''} on the STACKS network.`}
       </div>
 
       <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
@@ -60,7 +60,7 @@ export function TransactionReceipt({ receipt }: TransactionReceiptProps) {
               </span>
             </div>
             <a
-              href={`${SKALE_EXPLORER_URL}${tx.tx_hash}`}
+              href={`${STACKS_EXPLORER_URL}${tx.tx_hash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2 hover:bg-green-100 dark:hover:bg-green-800/50 rounded-lg text-green-700 dark:text-green-400 transition-colors flex-shrink-0"

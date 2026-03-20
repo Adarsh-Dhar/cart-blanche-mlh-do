@@ -231,7 +231,7 @@ export default function CheckoutPage() {
                         <Wallet className="w-12 h-12 mx-auto mb-4 text-primary" />
                         <p className="font-semibold mb-2">Connect Your Web3 Wallet</p>
                         <p className="text-sm text-muted-foreground mb-4">
-                          Pay with USDC on SKALE or Base network
+                          Pay with USDC on STACKS or Base network
                         </p>
                         <Button variant="outline" className="border-border/50 bg-transparent">
                           Connect Wallet

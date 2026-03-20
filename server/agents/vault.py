@@ -2,7 +2,7 @@
 agents/vault.py — Vault / Privacy Agent
 ========================================
 Purpose:
-  - Previously used SKALE BITE v2 threshold encryption (skale_bite).
+  - Previously used STACKS BITE v2 threshold encryption.
   - Now that we're on Stacks, there is no equivalent on-chain encryption
     protocol at settlement time — the burner wallet's private key is already
     XOR-encrypted with sha256(ownerPrincipal) at rest in the DB.

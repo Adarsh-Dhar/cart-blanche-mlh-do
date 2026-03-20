@@ -20,7 +20,7 @@ const MERCHANT_PERKS = [
   {
     icon: Wallet,
     title: 'Instant Crypto Settlement',
-    desc: 'Payments land in your wallet the moment a mandate is signed. USDC on SKALE — no chargebacks, no waiting, no middlemen.',
+    desc: 'Payments land in your wallet the moment a mandate is signed. USDCx on STACKS — no chargebacks, no waiting, no middlemen.',
   },
   {
     icon: ShieldCheck,
@@ -243,7 +243,7 @@ export default function HomePage() {
               <span className="hidden sm:block text-border">·</span>
               <span className="hidden sm:flex items-center gap-1.5 text-xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse inline-block" />
-                Powered by SKALE + x402
+                Powered by STACKS + x402
               </span>
             </div>
             <div className="flex gap-5">

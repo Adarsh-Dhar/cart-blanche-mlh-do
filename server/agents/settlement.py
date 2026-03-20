@@ -7,7 +7,7 @@ so the ReceiptCard always replaces the MandateCard — even on failure.
 
 Previously, errors were emitted as prose text (priority 0), which was
 permanently hidden behind the mandate card (priority 3), leaving the UI
-stuck on "Processing via SKALE network..." forever.
+stuck on "Processing via STACKS network..." forever.
 """
 from __future__ import annotations
 import json
@@ -66,7 +66,7 @@ def _failure_json(error_msg: str, mandate: dict | None = None) -> str:
         "status":   "failed",
         "receipts": [],
         "failures": failures,
-        "network":  "SKALE Base Sepolia",
+        "network":  "STACKS Base Sepolia",
         "details":  error_msg,
     })
 
@@ -135,7 +135,7 @@ async def settlement_node(state: AgentState) -> dict:
         "status":   result.get("status", "settled"),
         "receipts": receipts,
         "failures": result.get("failures", []),
-        "network":  result.get("network", "SKALE"),
+        "network":  result.get("network", "STACKS"),
         "details":  result.get("details", ""),
     })
 
