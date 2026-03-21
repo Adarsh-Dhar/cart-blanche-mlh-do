@@ -3402,8 +3402,8 @@ async function main() {
     },
     {
       productID: 'NF-GPT4O-1M-TOKENS',
-      name: 'GPT-4o – 1M Token Voucher',
-      description: '1 million tokens on GPT-4o via hosted API. Vision input supported, JSON mode, 128K context, function calling.',
+      name: 'gpt-4o-mini – 1M Token Voucher',
+      description: '1 million tokens on gpt-4o-mini via hosted API. Vision input supported, JSON mode, 128K context, function calling.',
       price: 29, cat: 'AI & Machine Learning', vendor: aiVendor.id,
     },
     {

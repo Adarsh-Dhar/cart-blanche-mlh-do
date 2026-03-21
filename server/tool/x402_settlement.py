@@ -247,10 +247,10 @@ class X402SettlementTool:
             )
 
         burner_address = burner_record.smartWalletAddress
-        if not isinstance(burner_address, str) or len(burner_address) != 41:
+        if not _validate_stacks_address(burner_address):
             raise ValueError(
                 f"Burner sender address is invalid: '{burner_address}' "
-                f"(length={len(burner_address) if burner_address else 'None'}, expected exactly 41)."
+                f"(length={len(burner_address) if burner_address else 'None'}, expected 40 or 41)."
             )
         owner_principal = burner_record.ownerEoa
         spend_limit_usdc = float(burner_record.spendLimitUsdc or DEFAULT_SPEND_LIMIT)
@@ -287,7 +287,10 @@ class X402SettlementTool:
         await asyncio.get_event_loop().run_in_executor(
             None, _drip_stx_sync, burner_address
         )
-        await asyncio.sleep(3)
+        # Wait for the Hiro API to ingest the STX drip into the mempool 
+        # so subsequent transactions don't fail the balance check.
+        logger.info("[X402] Waiting 15 seconds for STX drip to propagate to mempool...")
+        await asyncio.sleep(15)
 
         receipts: list[dict] = []
         failures: list[dict] = []
@@ -311,7 +314,7 @@ class X402SettlementTool:
                 error_msg = (
                     f"Invalid Stacks address for vendor '{vendor.get('name')}': "
                     f"'{vendor_principal}' "
-                    f"(length={len(vendor_principal)}, expected exactly 41). "
+                    f"(length={len(vendor_principal)}, expected 40 or 41). "
                     f"Fix this vendor's pubkey in /admin/vendors."
                 )
                 logger.error("[X402] %s", error_msg)

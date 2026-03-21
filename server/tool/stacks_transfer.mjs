@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 /**
- * stacks_transfer.mjs — Stacks SIP-010 transfer via @stacks/transactions SDK
- *
- * FIX: Accept both 40 and 41 character Stacks addresses (both are valid
- * c32check encodings depending on leading zero bytes in the hash160).
+ * stacks_transfer.mjs — Stacks SIP-010 & STX transfer via @stacks/transactions SDK
  */
 import {
   makeContractCall,
@@ -20,10 +17,10 @@ import {
   TransactionVersion
 } from "@stacks/transactions";
 
-/**
- * Validate a Stacks c32check principal address.
- * Accepts 40 OR 41 characters — both are valid depending on the hash160.
- */
+// CommonJS interoperability for @stacks/network
+import pkg from "@stacks/network";
+const network = pkg.STACKS_TESTNET || new pkg.StacksTestnet();
+
 function isValidStacksAddress(addr) {
   if (!addr || typeof addr !== "string") return false;
   if (addr[0] !== "S") return false;
@@ -41,63 +38,73 @@ async function main() {
     const data = JSON.parse(input);
     const { type, private_key, amount, memo, nonce } = data;
     
-    // Clean addresses — remove whitespace and stray quotes
+    // Clean strings and sanitize keys
     const recipient        = (data.recipient        || "").trim().replace(/['"]/g, "");
     const contract_address = (data.contract_address || "").trim().replace(/['"]/g, "");
     const contract_name    = (data.contract_name    || "").trim().replace(/['"]/g, "");
+    const cleanPrivateKey  = (private_key           || "").trim().replace(/^0x/, "");
     
+    // Cast to an integer string. This is the safest format across all Stacks SDK versions
+    // and prevents BigInt parsing bugs.
+    const safeAmountStr = Math.floor(Number(amount)).toString();
+
     let transaction;
-    const network = "testnet";
     
     if (type === "stx") {
       if (!isValidStacksAddress(recipient)) {
-        throw new Error(
-          `Invalid Stacks recipient address: "${recipient}" ` +
-          `(length=${recipient.length}, expected 40-41). ` +
-          `Update the vendor's pubkey in /admin/vendors.`
-        );
+        throw new Error(`Invalid Stacks recipient address: "${recipient}"`);
       }
-      transaction = await makeSTXTokenTransfer({
+      
+      const stxOptions = {
         recipient,
-        amount,
-        senderKey: private_key,
+        amount: safeAmountStr,
+        senderKey: cleanPrivateKey,
         network,
-        memo: memo || "",
         anchorMode: AnchorMode.Any,
-        nonce: nonce !== undefined ? BigInt(nonce) : undefined,
-      });
+        // Hardcode the fee to bypass flaky testnet fee estimation APIs
+        fee: "500", 
+      };
+      
+      // Only attach optional fields if they exist to prevent 'undefined' crashes
+      if (memo) stxOptions.memo = memo;
+      if (nonce !== undefined && nonce !== null) stxOptions.nonce = String(nonce);
+      
+      transaction = await makeSTXTokenTransfer(stxOptions);
+
     } else if (type === "sip010") {
       if (!isValidStacksAddress(recipient)) {
-        throw new Error(
-          `Invalid Stacks recipient address: "${recipient}" ` +
-          `(length=${recipient.length}, expected 40-41). ` +
-          `Update the vendor's pubkey in /admin/vendors to a valid Stacks address.`
-        );
+        throw new Error(`Invalid Stacks recipient address: "${recipient}"`);
       }
+      
       const senderAddress = ((data.sender_address || "").trim()) ||
-        getAddressFromPrivateKey(private_key, TransactionVersion.Testnet);
+        getAddressFromPrivateKey(cleanPrivateKey, TransactionVersion.Testnet);
+        
       if (!isValidStacksAddress(senderAddress)) {
-        throw new Error(
-          `Invalid Stacks sender address: "${senderAddress}" ` +
-          `(length=${senderAddress.length}, expected 40-41).`
-        );
+        throw new Error(`Invalid Stacks sender address: "${senderAddress}"`);
       }
-      transaction = await makeContractCall({
+      
+      const sipOptions = {
         contractAddress: contract_address,
         contractName:    contract_name,
         functionName:    "transfer",
         functionArgs: [
-          uintCV(amount),
+          uintCV(safeAmountStr),
           standardPrincipalCV(senderAddress),
           standardPrincipalCV(recipient),
           memo ? someCV(bufferCVFromString(memo)) : noneCV(),
         ],
-        senderKey:         private_key,
+        senderKey:         cleanPrivateKey,
         network,
         anchorMode:        AnchorMode.Any,
         postConditionMode: PostConditionMode.Allow,
-        nonce: nonce !== undefined ? BigInt(nonce) : undefined,
-      });
+        // Hardcode the fee for SIP-010 as well to be safe
+        fee: "1500", 
+      };
+      
+      if (nonce !== undefined && nonce !== null) sipOptions.nonce = String(nonce);
+      
+      transaction = await makeContractCall(sipOptions);
+      
     } else {
       throw new Error(`Invalid transaction type: "${type}". Expected "stx" or "sip010".`);
     }

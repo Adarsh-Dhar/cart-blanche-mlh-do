@@ -264,7 +264,7 @@ function ReceiptCard({ data }: { data: any }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 10 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#22d3ee" }}>${(r.amount_usd || 0).toFixed(2)}</span>
-                <a href={`https://explorer.hiro.so/txid/0x${r.tx_hash}?chain`} target="_blank" rel="noopener noreferrer"
+                <a href={`https://explorer.hiro.so/txid/0x${r.tx_hash}?chain=testnet`} target="_blank" rel="noopener noreferrer"
                   style={{ width: 24, height: 24, borderRadius: 6, background: "#22d3ee10", border: "1px solid #22d3ee25", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>
                   <ExternalLink size={11} color="#22d3ee" />
                 </a>

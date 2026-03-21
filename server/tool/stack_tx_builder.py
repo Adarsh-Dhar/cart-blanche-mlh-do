@@ -69,9 +69,11 @@ def _run_node_script(payload: dict) -> dict:
 
 def build_and_broadcast_stx_transfer(*, private_key_hex: str, recipient_address: str, amount_ustx: int, testnet: bool = True, fee_ustx: int = 200, api_base: Optional[str] = None) -> dict:
     logger.info(f"[StacksTx] Offloading STX drip to Node.js | recipient={recipient_address[:15]}... amount={amount_ustx}")
+    # Strip '0x' prefix if present
+    clean_pk = private_key_hex[2:] if private_key_hex.startswith("0x") else private_key_hex
     return _run_node_script({
         "type": "stx",
-        "private_key": private_key_hex,
+        "private_key": clean_pk,
         "recipient": recipient_address,
         "amount": amount_ustx
     })

@@ -259,7 +259,7 @@ async def health():
     return {
         "status":  "ok",
         "agents":  ["orchestrator", "shopping", "merchant", "vault", "settlement"],
-        "llm":     os.environ.get("GITHUB_MODEL_NAME", "gpt-4o"),
+        "llm":     os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini"),
         "db":      "prisma/postgresql",
         "wallet":  "ERC-4337 Smart Wallet + Session Key",
     }

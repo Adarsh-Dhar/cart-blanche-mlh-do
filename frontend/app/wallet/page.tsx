@@ -10,6 +10,9 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { openContractCall } from "@stacks/connect";
+import { uintCV, standardPrincipalCV, noneCV, AnchorMode, PostConditionMode } from "@stacks/transactions";
+import { STACKS_TESTNET } from "@stacks/network";
 import { connect } from "@stacks/connect";
 import {
   Wallet,
@@ -201,16 +204,50 @@ export default function WalletPage() {
       setActionError("Please connect your Stacks wallet (Leather or Xverse) first.");
       return;
     }
+
+    const depositParsed = parseFloat(depositAmount) || 100;
+
     try {
+      // 1. Generate the burner wallet session first (so we have an address to send to)
       const info = await authorizeShoppingAgent({
-        fundAmountUsdc:       parseFloat(depositAmount) || 100,
-        sessionDurationHours: parseInt(sessionHours)    || 24,
+        fundAmountUsdc:       depositParsed,
+        sessionDurationHours: parseInt(sessionHours) || 24,
         fundingAsset,
         ownerStacksAddress: stacksAddress,
       });
-      setExistingSession(info);
-      // Refresh balance after authorization
+
+      // 2. Calculate atomic units (assuming USDCx has 6 decimals)
+      const atomicAmount = Math.floor(depositParsed * 1_000_000);
+
+      // 3. Trigger the actual on-chain SIP-010 transfer
+      await new Promise<void>((resolve, reject) => {
+        openContractCall({
+          contractAddress: "ST2YR7WFYKW5D6Y8FK6C0CT0YP5DXCKSNDACMTHB4", // Your USDCx deployer
+          contractName: "usdcx-token",
+          functionName: "transfer",
+          functionArgs: [
+            uintCV(atomicAmount),
+            standardPrincipalCV(stacksAddress),           // From User
+            standardPrincipalCV(info.burnerAddress),      // To Burner
+            noneCV()                                      // No memo needed
+          ],
+          network: STACKS_TESTNET,
+          anchorMode: AnchorMode.Any,
+          postConditionMode: PostConditionMode.Allow,
+          onFinish: (data) => {
+            console.log("Deposit successful! TXID:", data.txId);
+            setExistingSession(info);
+            resolve();
+          },
+          onCancel: () => {
+            reject(new Error("Deposit transaction cancelled by user."));
+          },
+        });
+      });
+
+      // Refresh balance after successful authorization and transfer
       await refreshOwnerBalance(stacksAddress);
+
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : "Authorization failed");
     }
